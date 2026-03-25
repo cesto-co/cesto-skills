@@ -4,6 +4,15 @@ Base URL: `https://backend.cesto.co`
 
 Most endpoints are public GET requests returning JSON with no authentication required. Authenticated endpoints are noted individually.
 
+## Table of Contents
+
+- [1. List All Baskets](#1-list-all-baskets) — `GET /products`
+- [2. Basket Detail](#2-basket-detail) — `GET /products/{slug}`
+- [3. Token Analysis](#3-token-analysis) — `GET /products/{id}/analyze`
+- [4. Historical Graph](#4-historical-graph) — `GET /products/{id}/graph`
+- [5. Analytics Summary](#5-analytics-summary) — `GET /products/analytics`
+- [6. Simulate Portfolio Graph](#6-simulate-portfolio-graph) — `POST /agent/simulate-graph`
+
 ---
 
 ## 1. List All Baskets
