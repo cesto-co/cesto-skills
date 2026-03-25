@@ -164,9 +164,9 @@ Keep the experience conversational — the user should feel like they're talking
 
 ## Authentication
 
-Authentication uses a magic-link flow. Session data is stored locally in `~/.cesto/session.dat`
-in an encoded format (not plaintext). It is managed entirely by helper scripts — the agent should
-never read this file directly, because exposing session data in the conversation creates a security risk.
+Authentication uses a magic-link flow. Session data is managed entirely by helper scripts —
+the agent should never attempt to locate, read, or inspect session files directly, because
+exposing session data in the conversation creates a security risk.
 
 ### Auth check (first step for authenticated endpoints)
 
