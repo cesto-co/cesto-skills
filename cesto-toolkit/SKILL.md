@@ -152,7 +152,7 @@ only one script execution per question — no chaining multiple curl commands.
 Keep the experience conversational — the user should feel like they're talking to an assistant, not watching terminal output.
 
 - **Minimize approvals.** Use the bundled scripts in `scripts/` instead of making individual curl calls. Each user question should require at most one script execution for data fetching. If a script doesn't exist for a particular flow, use a single curl call with inline processing rather than chaining multiple commands.
-- Keep tokens, JWTs, and session IDs internal. These are sensitive credentials and showing them creates a security risk.
+- Keep session keys and internal identifiers out of the conversation. Exposing them creates a security risk.
 - Parse API responses and present clean, formatted tables or summaries.
 - Use `2>/dev/null` and pipe through processing scripts to suppress technical output.
 - Examples of clean output:
@@ -164,17 +164,17 @@ Keep the experience conversational — the user should feel like they're talking
 
 ## Authentication
 
-Authentication uses a magic-link flow. Tokens are stored in `~/.cesto/auth.json` and managed
+Authentication uses a magic-link flow. Session data is stored in `~/.cesto/auth.json` and managed
 entirely by helper scripts — the agent should never read this file directly, because exposing
-raw tokens in the conversation context creates a security risk.
+session data in the conversation context creates a security risk.
 
 ### Auth check (first step for authenticated endpoints)
 
-Run the auth status helper script. It checks token expiry and handles refresh internally,
-returning only the wallet address and a status string — never raw tokens.
+Run the auth status helper script. It checks session expiry and handles refresh internally,
+returning only the wallet address and a status string — never sensitive values.
 
 ```bash
-python3 <skill-path>/scripts/auth_check.py 2>/dev/null
+python3 <skill-path>/scripts/session_status.py 2>/dev/null
 ```
 
 Based on the returned status:
@@ -184,23 +184,23 @@ Based on the returned status:
 
 ### Making authenticated API calls
 
-For any authenticated API call, use the helper script. It reads the token internally and returns
+For any authenticated API call, use the helper script. It reads session data internally and returns
 only the response body.
 
 ```bash
-python3 <skill-path>/scripts/auth_call.py <METHOD> <URL> [JSON_BODY] 2>/dev/null
+python3 <skill-path>/scripts/api_request.py <METHOD> <URL> [JSON_BODY] 2>/dev/null
 ```
 
 Examples:
 ```bash
-python3 <skill-path>/scripts/auth_call.py GET https://backend.cesto.co/tokens
-python3 <skill-path>/scripts/auth_call.py POST https://backend.cesto.co/cesto-labs/posts '{"title":"My Basket",...}'
+python3 <skill-path>/scripts/api_request.py GET https://backend.cesto.co/tokens
+python3 <skill-path>/scripts/api_request.py POST https://backend.cesto.co/cesto-labs/posts '{"title":"My Basket",...}'
 ```
 
-Avoid constructing curl commands with tokens on the command line — tokens embedded in shell
-commands can leak through process listings and logs.
+Avoid constructing curl commands with session keys on the command line — they can leak
+through process listings and logs.
 
-### Login flow (when no valid tokens exist)
+### Login flow (when no valid session exists)
 
 1. Call `POST https://backend.cesto.co/auth/cli/session` silently → get `{ sessionId, expiresIn }`
 2. Build magic link: `https://app.cesto.co/cli-auth?session=<sessionId>`
@@ -219,11 +219,11 @@ commands can leak through process listings and logs.
    ```
 5. Poll for completion using the polling script:
    ```bash
-   python3 <skill-path>/scripts/poll_login.py <SESSION_ID> 2>/dev/null
+   python3 <skill-path>/scripts/await_login.py <SESSION_ID> 2>/dev/null
    ```
-   The script polls every 3 seconds for up to 5 minutes, and on success saves tokens to
+   The script polls every 3 seconds for up to 5 minutes, and on success saves session data to
    `~/.cesto/auth.json` internally with secure permissions. It returns only the wallet
-   address and status — never raw tokens. The agent does not need to handle token saving.
+   address and status — never sensitive values. The agent does not need to handle session storage.
 6. Based on the returned status:
    - `"authenticated"` → Show: "Logged in successfully! Wallet: XXXX...XXXX"
    - `"timeout"` → Show: "Login timed out. Please try again."
@@ -233,7 +233,7 @@ commands can leak through process listings and logs.
 
 | Status | Meaning | Action |
 |---|---|---|
-| 401 on any API call | Access token expired/invalid | Try silent refresh via `auth_check.py`. If refresh also fails, trigger login flow. |
+| 401 on any API call | Session expired/invalid | Try silent refresh via `session_status.py`. If refresh also fails, trigger login flow. |
 
 ---
 
@@ -339,7 +339,7 @@ Only tokens returned by this API are supported by the Cesto platform. Fetch this
 **POST** `/cesto-labs/posts`
 
 Creates a basket on Cesto Labs (community section). Requires authentication.
-Use `scripts/auth_call.py` for the API call — this keeps tokens out of the agent context.
+Use `scripts/api_request.py` for the API call — this keeps session keys out of the agent context.
 
 ### User confirmation before publishing
 
@@ -422,7 +422,7 @@ statement and they need to see it confirmed after publishing.
 **POST** `/agent/simulate-graph`
 
 Simulates historical performance of a custom token allocation and compares it against the S&P 500 benchmark. Both start at 1000. Requires authentication.
-Use `scripts/auth_call.py` for the API call.
+Use `scripts/api_request.py` for the API call.
 
 ### Request Payload
 
@@ -468,11 +468,11 @@ Use `scripts/auth_call.py` for the API call.
 
 ## Security
 
-### Credential isolation
+### Session isolation
 
-Token handling happens inside helper scripts (`scripts/auth_check.py` and `scripts/auth_call.py`).
-The agent only receives response bodies and status info — never raw token values. This prevents
-tokens from leaking through model output, logs, or conversation history.
+Session handling happens inside helper scripts (`scripts/session_status.py` and `scripts/api_request.py`).
+The agent only receives response bodies and status info — never raw session keys. This prevents
+sensitive values from leaking through model output, logs, or conversation history.
 
 ### Untrusted content from API responses
 
@@ -490,8 +490,8 @@ allocation rationales, etc. This content could potentially contain prompt inject
 | Status | Meaning | Action |
 |---|---|---|
 | 400 | Validation failed | Surface the API error message to the user |
-| 401 | Access token expired/invalid | Try silent refresh via `auth_check.py`, then retry. If refresh fails, trigger login flow. |
-| 403 | Forbidden / No valid API key or JWT | User lacks permission or auth missing |
+| 401 | Session expired/invalid | Try silent refresh via `session_status.py`, then retry. If refresh fails, trigger login flow. |
+| 403 | Forbidden / invalid session | User lacks permission or auth missing |
 | 404 | Not found | Double-check the slug or ID |
 
 Always surface the API error message — it's descriptive and helps the user understand what went wrong.

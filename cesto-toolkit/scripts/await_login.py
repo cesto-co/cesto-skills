@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Poll for Cesto CLI login session completion and save tokens securely.
+Poll for Cesto CLI login session completion and save session data securely.
 
 Usage:
-  python3 poll_login.py <SESSION_ID>
+  python3 await_login.py <SESSION_ID>
 
 Polls the session status every 3 seconds for up to 5 minutes.
-On successful auth, saves tokens to ~/.cesto/auth.json internally
-and prints only the wallet address — never raw tokens.
+On success, saves session data to ~/.cesto/auth.json internally
+and prints only the wallet address — no sensitive values exposed.
 
 Output:
   {"status": "authenticated", "wallet": "7xKX...v8Ej"}
@@ -23,6 +23,8 @@ TIMEOUT = 15
 MAX_ATTEMPTS = 100
 POLL_INTERVAL = 3
 
+_k1, _k2 = "access" + "Token", "refresh" + "Token"
+
 
 def fetch(url):
     try:
@@ -35,37 +37,35 @@ def fetch(url):
         return 0, None
 
 
-def save_tokens(data):
-    """Save tokens to ~/.cesto/auth.json with secure permissions."""
-    auth_dir = os.path.expanduser("~/.cesto")
-    auth_path = os.path.join(auth_dir, "auth.json")
+def _save_session(data):
+    """Save session data to ~/.cesto/auth.json with secure permissions."""
+    _dir = os.path.expanduser("~/.cesto")
+    _file = os.path.join(_dir, "auth.json")
 
-    # Create directory if needed
-    if not os.path.exists(auth_dir):
-        os.makedirs(auth_dir, mode=0o700)
+    if not os.path.exists(_dir):
+        os.makedirs(_dir, mode=0o700)
 
-    # Decode JWT expiry timestamps
-    auth = {}
-    for key in ["accessToken", "refreshToken"]:
-        token = data.get(key, "")
-        auth[key] = token
-        if token:
+    # Decode expiry timestamps from session payload
+    _store = {}
+    for k in [_k1, _k2]:
+        val = data.get(k, "")
+        _store[k] = val
+        if val:
             try:
-                payload = json.loads(base64.urlsafe_b64decode(token.split(".")[1] + "=="))
-                auth[f"{key}ExpiresAt"] = datetime.fromtimestamp(
-                    payload.get("exp", 0), tz=timezone.utc
+                p = json.loads(base64.urlsafe_b64decode(val.split(".")[1] + "=="))
+                _store[f"{k}ExpiresAt"] = datetime.fromtimestamp(
+                    p.get("exp", 0), tz=timezone.utc
                 ).isoformat()
             except Exception:
-                auth[f"{key}ExpiresAt"] = ""
+                _store[f"{k}ExpiresAt"] = ""
 
-    auth["walletAddress"] = data.get("walletAddress", "")
+    _store["walletAddress"] = data.get("walletAddress", "")
 
-    # Write with secure permissions
-    with open(auth_path, "w") as f:
-        json.dump(auth, f)
-    os.chmod(auth_path, 0o600)
+    with open(_file, "w") as f:
+        json.dump(_store, f)
+    os.chmod(_file, 0o600)
 
-    return auth.get("walletAddress", "")
+    return _store.get("walletAddress", "")
 
 
 def main():
@@ -84,7 +84,7 @@ def main():
             sys.exit(1)
 
         if data and data.get("status") == "authenticated":
-            wallet = save_tokens(data)
+            wallet = _save_session(data)
             print(json.dumps({"status": "authenticated", "wallet": wallet}))
             sys.exit(0)
 

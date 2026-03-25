@@ -488,18 +488,15 @@ Each entry is keyed by the basket's `id` (UUID).
 
 Simulates historical performance of a custom token allocation and compares it against the S&P 500 benchmark. Both start at 1000.
 
-**Authentication required.** Use one of:
-- JWT token: `Authorization: Bearer <accessToken>`
-- Agent API key: `x-agent-api-key: <key>`
+**Authentication required.** Use `scripts/api_request.py` which handles session headers internally.
 
 ### Request
 
-**Headers:**
+**Headers:** Handled by `api_request.py`. Only the body needs to be provided.
 
 | Header | Value |
 |--------|-------|
 | `Content-Type` | `application/json` |
-| `Authorization` | `Bearer <accessToken>` (or use `x-agent-api-key` header instead) |
 
 **Body:**
 
@@ -589,4 +586,4 @@ Simulates historical performance of a custom token allocation and compares it ag
 | Status | When |
 |--------|------|
 | 400 | Missing/invalid fields (empty allocations, missing name, etc.) |
-| 403 | No valid API key or JWT token provided |
+| 403 | No valid session or API key provided |
