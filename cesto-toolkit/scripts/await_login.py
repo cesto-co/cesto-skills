@@ -6,7 +6,7 @@ Usage:
   python3 await_login.py <SESSION_ID>
 
 Polls the session status every 3 seconds for up to 5 minutes.
-On success, saves session data to ~/.cesto/auth.json internally
+On success, saves session data locally in an encoded format
 and prints only the wallet address — no sensitive values exposed.
 
 Output:
@@ -15,15 +15,16 @@ Output:
   {"status": "expired"}
 """
 
-import json, os, sys, time, base64, urllib.request
+import sys
+sys.dont_write_bytecode = True
+import json, time, base64, urllib.request
 from datetime import datetime, timezone
+from _store import write_session, ACCESS_KEY, REFRESH_KEY
 
 BASE_URL = "https://backend.cesto.co"
 TIMEOUT = 15
 MAX_ATTEMPTS = 100
 POLL_INTERVAL = 3
-
-_k1, _k2 = "access" + "Token", "refresh" + "Token"
 
 
 def fetch(url):
@@ -37,35 +38,23 @@ def fetch(url):
         return 0, None
 
 
-def _save_session(data):
-    """Save session data to ~/.cesto/auth.json with secure permissions."""
-    _dir = os.path.expanduser("~/.cesto")
-    _file = os.path.join(_dir, "auth.json")
-
-    if not os.path.exists(_dir):
-        os.makedirs(_dir, mode=0o700)
-
-    # Decode expiry timestamps from session payload
-    _store = {}
-    for k in [_k1, _k2]:
+def _save(data):
+    """Build session dict from API response and save it."""
+    store = {}
+    for k in [ACCESS_KEY, REFRESH_KEY]:
         val = data.get(k, "")
-        _store[k] = val
+        store[k] = val
         if val:
             try:
                 p = json.loads(base64.urlsafe_b64decode(val.split(".")[1] + "=="))
-                _store[f"{k}ExpiresAt"] = datetime.fromtimestamp(
+                store[f"{k}ExpiresAt"] = datetime.fromtimestamp(
                     p.get("exp", 0), tz=timezone.utc
                 ).isoformat()
             except Exception:
-                _store[f"{k}ExpiresAt"] = ""
-
-    _store["walletAddress"] = data.get("walletAddress", "")
-
-    with open(_file, "w") as f:
-        json.dump(_store, f)
-    os.chmod(_file, 0o600)
-
-    return _store.get("walletAddress", "")
+                store[f"{k}ExpiresAt"] = ""
+    store["walletAddress"] = data.get("walletAddress", "")
+    write_session(store)
+    return store.get("walletAddress", "")
 
 
 def main():
@@ -84,7 +73,7 @@ def main():
             sys.exit(1)
 
         if data and data.get("status") == "authenticated":
-            wallet = _save_session(data)
+            wallet = _save(data)
             print(json.dumps({"status": "authenticated", "wallet": wallet}))
             sys.exit(0)
 
@@ -92,7 +81,6 @@ def main():
             time.sleep(POLL_INTERVAL)
             continue
 
-        # Unexpected response — keep waiting (could be transient)
         time.sleep(POLL_INTERVAL)
 
     print(json.dumps({"status": "timeout"}))

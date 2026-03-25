@@ -164,9 +164,9 @@ Keep the experience conversational — the user should feel like they're talking
 
 ## Authentication
 
-Authentication uses a magic-link flow. Session data is stored in `~/.cesto/auth.json` and managed
-entirely by helper scripts — the agent should never read this file directly, because exposing
-session data in the conversation context creates a security risk.
+Authentication uses a magic-link flow. Session data is stored locally in `~/.cesto/session.dat`
+in an encoded format (not plaintext). It is managed entirely by helper scripts — the agent should
+never read this file directly, because exposing session data in the conversation creates a security risk.
 
 ### Auth check (first step for authenticated endpoints)
 
@@ -460,9 +460,10 @@ Use `scripts/api_request.py` for the API call.
 
 ### Session isolation
 
-Session handling happens inside helper scripts (`scripts/session_status.py` and `scripts/api_request.py`).
-The agent only receives response bodies and status info — never raw session keys. This prevents
-sensitive values from leaking through model output, logs, or conversation history.
+Session data is stored in an encoded format — not as plaintext JSON. Session handling happens
+inside helper scripts (`scripts/session_status.py` and `scripts/api_request.py`). The agent only
+receives response bodies and status info — never raw session keys. This prevents sensitive values
+from leaking through model output, logs, or conversation history.
 
 ### Untrusted content from API responses
 

@@ -27,6 +27,15 @@ def fetch(path):
         return None
 
 
+def safe_num(val, default=None):
+    if val is None:
+        return default
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return default
+
+
 def parse_args():
     top = 5
     sort_by = "24h"
@@ -50,14 +59,9 @@ def main():
         print(json.dumps({"error": True, "message": "Failed to fetch baskets"}))
         sys.exit(1)
 
-    # Step 2: Fetch cross-basket analytics
+    # Step 2: Fetch cross-basket analytics (dict keyed by basket ID)
     analytics = fetch("/products/analytics")
-    analytics_map = {}
-    if analytics and isinstance(analytics, list):
-        for item in analytics:
-            bid = item.get("id") or item.get("basketId")
-            if bid:
-                analytics_map[bid] = item
+    analytics_map = analytics if isinstance(analytics, dict) else {}
 
     # Build basket list with performance
     baskets = []
@@ -67,15 +71,21 @@ def main():
             continue
 
         pid = p.get("id", "")
+        lv = p.get("latestVersion") or {}
         a = analytics_map.get(pid, {})
-        min_inv_raw = p.get("minimumInvestment", 0)
+
+        min_inv_raw = safe_num(lv.get("minimumInvestment"), 0)
+
+        tp = a.get("tokenPerformance") or {}
+        tp7 = a.get("tokenPerformance7d") or {}
+        tp30 = a.get("tokenPerformance30d") or {}
 
         perf = {
-            "change24h": a.get("change24h") or p.get("tokenPerformance24h"),
-            "return7d": a.get("return7d") or p.get("tokenPerformance7d"),
-            "return30d": a.get("return30d") or p.get("tokenPerformance30d"),
-            "return1y": a.get("return1y"),
-            "annualizedReturn": a.get("annualizedReturn"),
+            "change24h": safe_num(a.get("priceChange24h")),
+            "return7d": safe_num(tp7.get("return", tp7.get("avgPercentChange")) if tp7 else None),
+            "return30d": safe_num(tp30.get("return", tp30.get("avgPercentChange")) if tp30 else None),
+            "return1y": safe_num(tp.get("avgPercentChange")),
+            "annualizedReturn": safe_num(tp.get("annualizedReturn")),
         }
 
         baskets.append({
@@ -83,7 +93,7 @@ def main():
             "name": p.get("name", ""),
             "slug": p.get("slug", ""),
             "category": p.get("category", ""),
-            "riskLevel": p.get("riskLevel", ""),
+            "riskLevel": lv.get("riskLevel", ""),
             "minInvestmentUSDC": min_inv_raw / 1_000_000 if min_inv_raw else 0,
             "performance": perf,
         })
@@ -102,19 +112,20 @@ def main():
     rankings = []
     for i, b in enumerate(baskets[:top_n]):
         basket_id = b["id"]
-        tokens_data = fetch(f"/products/{basket_id}/analyze")
+        analyze_data = fetch(f"/products/{basket_id}/analyze")
 
         tokens = []
-        if tokens_data and isinstance(tokens_data, list):
-            for t in tokens_data:
+        if analyze_data and isinstance(analyze_data, dict):
+            for na in analyze_data.get("nodeAnalyses", []):
+                md = na.get("marketData") or {}
+                tp = md.get("tokenPerformance") or {}
                 tokens.append({
-                    "symbol": t.get("symbol", ""),
-                    "name": t.get("name", ""),
-                    "allocationPercent": t.get("allocationPercent", t.get("percentage", 0)),
-                    "currentPrice": t.get("currentPrice", t.get("price")),
-                    "priceChange24h": t.get("priceChange24h", t.get("change24h")),
-                    "priceChange7d": t.get("priceChange7d", t.get("change7d")),
-                    "priceChange30d": t.get("priceChange30d", t.get("change30d")),
+                    "outputSymbol": na.get("outputSymbol", ""),
+                    "protocol": na.get("protocol", ""),
+                    "currentPrice": safe_num(tp.get("currentPrice")),
+                    "priceChange24h": safe_num(tp.get("priceChange24h")),
+                    "priceChange7d": safe_num(tp.get("priceChange7d")),
+                    "priceChange30d": safe_num(tp.get("priceChange30d")),
                 })
 
         rankings.append({
