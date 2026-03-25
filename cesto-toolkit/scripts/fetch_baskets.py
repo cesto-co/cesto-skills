@@ -29,6 +29,16 @@ def fetch(path):
         return None
 
 
+def safe_num(val, default=None):
+    """Safely convert a value to float, handling strings and None."""
+    if val is None:
+        return default
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return default
+
+
 def parse_sort_flag():
     for arg in sys.argv[1:]:
         if arg.startswith("--sort="):
@@ -46,28 +56,29 @@ def main():
         print(json.dumps({"error": True, "message": "Failed to fetch baskets"}))
         sys.exit(1)
 
-    # Build analytics lookup by basket ID
-    analytics_map = {}
-    if analytics and isinstance(analytics, list):
-        for item in analytics:
-            bid = item.get("id") or item.get("basketId")
-            if bid:
-                analytics_map[bid] = item
+    # Analytics is a dict keyed by basket ID
+    analytics_map = analytics if isinstance(analytics, dict) else {}
 
     results = []
     for p in products:
         pid = p.get("id", "")
+        lv = p.get("latestVersion") or {}
         a = analytics_map.get(pid, {})
 
-        min_inv_raw = p.get("minimumInvestment", 0)
+        min_inv_raw = safe_num(lv.get("minimumInvestment"), 0)
         min_inv_usdc = min_inv_raw / 1_000_000 if min_inv_raw else 0
 
+        # Performance from analytics
+        tp = a.get("tokenPerformance") or {}
+        tp7 = a.get("tokenPerformance7d") or {}
+        tp30 = a.get("tokenPerformance30d") or {}
+
         perf = {
-            "change24h": a.get("change24h") or p.get("tokenPerformance24h"),
-            "return7d": a.get("return7d") or p.get("tokenPerformance7d"),
-            "return30d": a.get("return30d") or p.get("tokenPerformance30d"),
-            "return1y": a.get("return1y"),
-            "annualizedReturn": a.get("annualizedReturn"),
+            "change24h": safe_num(a.get("priceChange24h")),
+            "return7d": safe_num(tp7.get("return", tp7.get("avgPercentChange"))),
+            "return30d": safe_num(tp30.get("return", tp30.get("avgPercentChange"))),
+            "return1y": safe_num(tp.get("avgPercentChange")),
+            "annualizedReturn": safe_num(tp.get("annualizedReturn")),
         }
 
         results.append({
@@ -75,10 +86,9 @@ def main():
             "slug": p.get("slug", ""),
             "name": p.get("name", ""),
             "category": p.get("category", ""),
-            "riskLevel": p.get("riskLevel", ""),
-            "activePositions": p.get("activePositions", 0),
+            "riskLevel": lv.get("riskLevel", ""),
+            "activePositions": lv.get("activePositionCount", 0),
             "minInvestmentUSDC": min_inv_usdc,
-            "tokenCount": len(p.get("definition", {}).get("nodes", [])) if isinstance(p.get("definition"), dict) else 0,
             "performance": perf,
         })
 

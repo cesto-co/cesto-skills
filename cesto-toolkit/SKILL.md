@@ -164,9 +164,9 @@ Keep the experience conversational — the user should feel like they're talking
 
 ## Authentication
 
-Authentication uses a magic-link flow. Session data is stored in `~/.cesto/auth.json` and managed
-entirely by helper scripts — the agent should never read this file directly, because exposing
-session data in the conversation context creates a security risk.
+Authentication uses a magic-link flow. Session data is stored locally in `~/.cesto/session.dat`
+in an encoded format (not plaintext). It is managed entirely by helper scripts — the agent should
+never read this file directly, because exposing session data in the conversation creates a security risk.
 
 ### Auth check (first step for authenticated endpoints)
 
@@ -204,11 +204,10 @@ through process listings and logs.
 
 1. Call `POST https://backend.cesto.co/auth/cli/session` silently → get `{ sessionId, expiresIn }`
 2. Build magic link: `https://app.cesto.co/cli-auth?session=<sessionId>`
-3. Open browser automatically:
-   - Mac: `open <url>`
-   - Linux: `xdg-open <url>`
-   - Windows: `start <url>`
-   - If open fails → show the link
+3. Ask the user: "I need to open your browser to log in to Cesto. Open it now?"
+   - If yes → open browser: Mac `open <url>`, Linux `xdg-open <url>`, Windows `start <url>`
+   - If no → show the URL and let them open it manually
+   - If open fails → show the link as fallback
 4. Show the user:
    ```
    Opening browser to log in...
@@ -222,7 +221,7 @@ through process listings and logs.
    python3 <skill-path>/scripts/await_login.py <SESSION_ID> 2>/dev/null
    ```
    The script polls every 3 seconds for up to 5 minutes, and on success saves session data to
-   `~/.cesto/auth.json` internally with secure permissions. It returns only the wallet
+   `~/.cesto/session.dat` internally with secure permissions. It returns only the wallet
    address and status — never sensitive values. The agent does not need to handle session storage.
 6. Based on the returned status:
    - `"authenticated"` → Show: "Logged in successfully! Wallet: XXXX...XXXX"
@@ -470,9 +469,10 @@ Use `scripts/api_request.py` for the API call.
 
 ### Session isolation
 
-Session handling happens inside helper scripts (`scripts/session_status.py` and `scripts/api_request.py`).
-The agent only receives response bodies and status info — never raw session keys. This prevents
-sensitive values from leaking through model output, logs, or conversation history.
+Session data is stored in an encoded format — not as plaintext JSON. Session handling happens
+inside helper scripts (`scripts/session_status.py` and `scripts/api_request.py`). The agent only
+receives response bodies and status info — never raw session keys. This prevents sensitive values
+from leaking through model output, logs, or conversation history.
 
 ### Untrusted content from API responses
 
