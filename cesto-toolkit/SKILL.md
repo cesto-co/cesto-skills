@@ -194,7 +194,7 @@ python3 <skill-path>/scripts/api_request.py <METHOD> <URL> [JSON_BODY] 2>/dev/nu
 Examples:
 ```bash
 python3 <skill-path>/scripts/api_request.py GET https://backend.cesto.co/tokens
-python3 <skill-path>/scripts/api_request.py POST https://backend.cesto.co/cesto-labs/posts '{"title":"My Basket",...}'
+python3 <skill-path>/scripts/api_request.py POST https://backend.cesto.co/labs/posts '{"title":"My Basket",...}'
 ```
 
 Avoid constructing curl commands with session keys on the command line — they can leak
@@ -287,7 +287,7 @@ When in doubt about which script to use, prefer the more comprehensive one — i
 | 4 | `/products/{id}/analyze` | GET | No | Per-token market data for a basket |
 | 5 | `/products/{id}/graph` | GET | No | Historical time series (portfolio vs S&P 500) |
 | 6 | `/products/analytics` | GET | No | Cross-basket analytics summary |
-| 7 | `/cesto-labs/posts` | POST | Yes | Create a Cesto Labs basket |
+| 7 | `/labs/posts` | POST | Yes | Create a Cesto Labs basket |
 | 8 | `/agent/simulate-graph` | POST | Yes | Simulate portfolio historical performance |
 
 For endpoint details (slugs vs IDs, response structures, field notes), see [references/api-reference.md](references/api-reference.md).
@@ -326,7 +326,7 @@ Only tokens returned by this API are supported by the Cesto platform. Fetch this
 
 ## 7. Create Cesto Labs Basket
 
-**POST** `/cesto-labs/posts`
+**POST** `/labs/posts`
 
 Creates a basket on Cesto Labs (community section). Requires authentication.
 Use `scripts/api_request.py` for the API call — this keeps session keys out of the agent context.

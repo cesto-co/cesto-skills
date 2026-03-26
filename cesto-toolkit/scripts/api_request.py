@@ -11,10 +11,11 @@ Usage:
 
 Examples:
   python3 api_request.py GET https://backend.cesto.co/tokens
-  python3 api_request.py POST https://backend.cesto.co/cesto-labs/posts '{"title":"My Basket",...}'
+  python3 api_request.py POST https://backend.cesto.co/labs/posts '{"title":"My Basket",...}'
 """
 
 import sys
+
 sys.dont_write_bytecode = True
 import json, urllib.request
 from _store import read_session, ACCESS_KEY
@@ -26,16 +27,22 @@ ALLOWED_ORIGINS = [
 url = sys.argv[2] if len(sys.argv) > 2 else ""
 
 if not any(url.startswith(origin) for origin in ALLOWED_ORIGINS):
-    print(json.dumps({
-        "error": True,
-        "status": 403,
-        "message": f"Blocked: URL must start with one of {ALLOWED_ORIGINS}"
-    }))
+    print(
+        json.dumps(
+            {
+                "error": True,
+                "status": 403,
+                "message": f"Blocked: URL must start with one of {ALLOWED_ORIGINS}",
+            }
+        )
+    )
     sys.exit(1)
 
 _session = read_session()
 if _session is None:
-    print(json.dumps({"error": True, "status": 401, "message": "No valid session found"}))
+    print(
+        json.dumps({"error": True, "status": 401, "message": "No valid session found"})
+    )
     sys.exit(1)
 
 _key = _session[ACCESS_KEY]
