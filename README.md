@@ -84,7 +84,7 @@ The skill provides access to 8 Cesto API endpoints:
 
 | # | Endpoint | Method | Description |
 |---|----------|--------|-------------|
-| 7 | `/cesto-labs/posts` | POST | Create a basket post on Cesto Labs |
+| 7 | `/labs/posts` | POST | Create a basket post on Cesto Labs |
 | 8 | `/agent/simulate-graph` | POST | Simulate portfolio historical performance |
 
 ---
