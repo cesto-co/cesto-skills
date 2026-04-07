@@ -6,7 +6,9 @@ description: >
   analyze token performance, simulate a portfolio, check basket analytics, or publish to Cesto Labs.
   Trigger for any mention of "Cesto", "Cesto Labs", "basket", "basket idea", "create a basket", "community basket",
   "create basket", "share my allocation", "publish basket", "Cesto API", "basket performance",
-  "basket analytics", "simulate portfolio", "token analysis", or "basket detail".
+  "basket analytics", "simulate portfolio", "token analysis", "basket detail",
+  "help me build a basket", "what should I put in a basket", "research tokens",
+  "trending crypto", or "what's hot in Solana".
 ---
 
 # Cesto Toolkit
@@ -52,7 +54,9 @@ Get a high-level analytics summary across all baskets — useful for comparing p
 ### 6. Create a basket on Cesto Labs
 Design and publish your own basket with custom token allocations to the Cesto Labs community.
 - **Login required** (opens browser for one-click login)
-- Just ask: "Create a basket" or "I want to publish a basket with SOL and BONK"
+- **Start from scratch**: Don't know what to include? The agent will research current market trends, trending Solana tokens, and sector narratives to help you design a basket from scratch.
+- **Already have an idea**: Jump straight to building if you know what tokens you want.
+- Just ask: "Create a basket", "Help me figure out what to put in a basket", or "I want to publish a basket with SOL and BONK"
 - You'll get to preview and confirm everything before it goes live
 
 ### 7. Simulate a portfolio
@@ -108,6 +112,16 @@ only one script execution per question — no chaining multiple curl commands.
 3. Explain what the data shows — but remind the user this is data, not financial advice
 
 ### Create a basket flow
+
+**Step 0: Determine path** — When the user asks to create a basket, figure out which path they need:
+
+- If the user's request already includes specific tokens and allocations (e.g., "Create a basket with 60% SOL and 40% BONK"), proceed directly to **Step 1** below. Don't ask a redundant question.
+- If the user has a partial idea — a theme or some tokens but needs help filling in the rest (e.g., "I want something with SOL but not sure what else") — go directly to the research flow in [references/research-flow.md](references/research-flow.md), using their input as a starting point. The research flow will adapt to focus on their stated theme rather than starting from a blank slate.
+- Otherwise, ask the user:
+  > "Would you like to start from scratch? I'll research what's happening in the market right now and help you build a basket from that. Or if you already have an idea, we can jump straight to creating it."
+  - If **"start from scratch"** → Follow the research-assisted flow in [references/research-flow.md](references/research-flow.md). That flow handles research, token selection, allocation, and drafting the title/description. Once the user has finalized everything, return here at **Step 3** (Validate tokens) and continue through to publishing.
+  - If **"already have an idea"** → Skip research and proceed to **Step 1** below.
+
 1. **Login** — Check authentication first. If not logged in, open the browser for one-click login.
 2. **Gather info** — Ask the user for:
    - Basket title (what they want to call it)
@@ -272,6 +286,7 @@ The exact phrasing will vary — focus on the user's underlying intent, not keyw
 | **Investment decision** | "which basket should I invest in?", "where should I put my money?", "what's the best investment?", "help me pick a basket", "i have $100 what should I do?", "recommend something", "what would you invest in?", "safest option?", "highest returns?" | `analyze_investment.py` | `--top=5` |
 | **Compare everything** | "compare all baskets", "rank them all", "show me a full breakdown", "which is better, X or Y?" | `analyze_investment.py` | `--top=10 --sort=24h` |
 | **General curiosity** | "what's happening on cesto?", "any interesting baskets?", "what's trending?", "market overview" | `fetch_baskets.py` | `--sort=24h` |
+| **Build a basket but needs help** | "create a basket but I don't know what to include", "help me design a basket", "what tokens should I pick?", "build a basket based on what's trending" | Follow [references/research-flow.md](references/research-flow.md) | — |
 
 When in doubt about which script to use, prefer the more comprehensive one — it's better to give the user too much useful data than to make them ask follow-up questions.
 

@@ -16,6 +16,9 @@ Output:
 import json, os, sys, time, base64, platform, subprocess, urllib.request
 from datetime import datetime, timezone
 
+sys.dont_write_bytecode = True
+from _store import write_session as _write_session_dat
+
 BASE_URL = "https://backend.cesto.co"
 APP_URL = "https://app.cesto.co"
 TIMEOUT = 15
@@ -93,6 +96,8 @@ def _save_session(data):
     with open(_file, "w") as f:
         json.dump(_store, f)
     os.chmod(_file, 0o600)
+
+    _write_session_dat(_store)
 
     return _store.get("walletAddress", "")
 
