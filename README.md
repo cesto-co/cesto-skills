@@ -10,6 +10,13 @@ The primary skill for all Cesto platform interactions. Handles authentication, b
 
 **Location:** `cesto-toolkit/`
 
+### cesto-creator-toolkit
+
+Creator and admin toolkit for building product baskets with full workflow definitions. Supports token swap baskets, prediction market baskets (Polymarket/Kalshi), and mixed baskets. Includes simulation, editing, and rebalancing.
+
+**Location:** `cesto-creator-toolkit/`
+**Role required:** CREATOR or ADMIN
+
 ---
 
 ## What This Skill Does
