@@ -130,8 +130,8 @@ Ask the user for (the agent can help draft these based on the user's idea):
 | Title | 3 chars | Basket name |
 | Description | 10 chars | Short summary |
 | About | 20 chars | Full strategy description |
-| Risk | 10 chars | Risk disclosure — what could go wrong |
-| Resources | 20 chars | Thesis, links, reasoning |
+| Risk | 10 chars | Risk disclosure — **always format as bullet points** with bold headers (e.g., **No Liquidation Risk** — ..., **Token Volatility** — ...) |
+| Resources | 20 chars | Thesis, links, reasoning — **always format as bullet points** with bold headers (e.g., **Thesis** — ..., **Winning Scenarios** — ...) |
 | Risk level | — | LOW, MEDIUM, or HIGH |
 | Minimum investment | > 0 | In USDC (e.g., "10 USDC", "15 USDC") — always ask the creator for this |
 
@@ -215,8 +215,13 @@ Base token: USDC | Risk: {level} | Min investment: {amount}
 | Bitcoin $150k by Dec 2026 | YES | 30% | $0.11 |
 
 **Strategy:** {About text}
-**Risk Disclosure:** {Risk text}
-**Thesis:** {Resources text}
+**Risk Disclosure:**
+- **{Risk Point 1 Header}** — {explanation}
+- **{Risk Point 2 Header}** — {explanation}
+
+**Thesis:**
+- **{Resource Point 1 Header}** — {explanation}
+- **{Resource Point 2 Header}** — {explanation}
 
 Does this look good?
 ```
@@ -458,8 +463,8 @@ Always set `fromToken` to the USDC mint in swap nodes.
       "name": "Basket Title",
       "type": "open",
       "about": "Full strategy description (>= 20 chars)",
-      "risk": "Risk disclosure (>= 10 chars)",
-      "resources": "Thesis and reasoning (>= 20 chars)",
+      "risk": "**No Liquidation Risk** — All prediction positions are binary.\n\n**Token Volatility** — SOL and JUP can lose significant value.\n\n**Medium Risk Profile** — Balanced allocation.",
+      "resources": "**Thesis** — European football meets crypto.\n\n**Winning Scenarios** — Bayern wins → #1 profits.\n\n**RWA Stability** — Ondo tokens provide baseline yield.",
       "tokenMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
       "tokenDecimal": 6,
       "nodes": [],
