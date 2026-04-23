@@ -1,8 +1,8 @@
 ---
 name: cesto-creator-toolkit
 description: >
-  Creator and admin toolkit for building product baskets on Cesto with full workflow definitions.
-  Use this skill when the user has CREATOR or ADMIN role and wants to: create a product basket
+  Creator toolkit for building product baskets on Cesto with full workflow definitions.
+  Use this skill when the user has CREATOR role and wants to: create a product basket
   (with token swaps, prediction markets, or both), edit an existing basket, rebalance allocations,
   simulate basket performance, manage their published baskets, or build mixed token+prediction baskets.
   Trigger for: "creator basket", "create product", "basket builder", "prediction basket",
@@ -14,7 +14,7 @@ description: >
 # Creator Toolkit
 
 Build, edit, and rebalance product baskets on the [Cesto](https://www.dev.app.cesto.co) platform. This skill
-is for users with **CREATOR** or **ADMIN** roles. It supports token swap baskets, prediction market
+is for users with the **CREATOR** role only. It supports token swap baskets, prediction market
 baskets (Polymarket/Kalshi), and mixed baskets combining both.
 
 **Backend URL:** `https://dev.backend.cesto.co`
@@ -27,17 +27,17 @@ baskets (Polymarket/Kalshi), and mixed baskets combining both.
 ### 1. Create a product basket
 Design and publish a basket with token swaps, prediction market positions, or both. Includes full
 workflow definitions with nodes, connections, risk disclosures, and strategy descriptions.
-- **CREATOR or ADMIN role required**
+- **CREATOR role required**
 - Supports: token-only, prediction-only, and mixed baskets
 - Base token: USDC only
 
 ### 2. Edit an existing basket
 Update metadata (name, description, about, risk, resources, thumbnail) without changing allocations.
-- **CREATOR or ADMIN role required**
+- **CREATOR role required**
 
 ### 3. Rebalance a basket
 Change token allocations or prediction positions — creates a new version of the basket.
-- **CREATOR or ADMIN role required**
+- **CREATOR role required**
 
 ### 4. Simulate a basket
 Preview how a basket's workflow would perform historically before publishing.
@@ -45,7 +45,7 @@ Preview how a basket's workflow would perform historically before publishing.
 
 ### 5. Manage your baskets
 List all baskets you've created, view their status, and pick one to edit or rebalance.
-- **CREATOR or ADMIN role required**
+- **CREATOR role required**
 
 ### 6. Research-assisted creation
 Don't know what to include? The agent researches the **real-world ecosystem** around the user's
@@ -69,8 +69,8 @@ python3 <skill-path>/scripts/session_status.py 2>/dev/null
 ```
 
 This returns status, wallet address, **and role**. Based on the response:
-- `"valid"` or `"refreshed"` with role `CREATOR`/`ADMIN` → proceed
-- `"unauthorized"` → "You need CREATOR or ADMIN role to use this skill. Your current role is {role}."
+- `"valid"` or `"refreshed"` with role `CREATOR` → proceed
+- `"unauthorized"` → "You need CREATOR role to use this skill. Your current role is {role}."
 - `"expired"` → trigger login flow
 
 ### Login flow
@@ -88,8 +88,7 @@ Same behavior as the main Cesto toolkit — creates session, opens browser to
 python3 <skill-path>/scripts/check_role.py 2>/dev/null
 ```
 
-Returns `{"role": "CREATOR", "endpoint_prefix": "/creator", ...}`. The `endpoint_prefix` determines
-which API path to use for create/update/rebalance operations.
+Returns `{"role": "CREATOR", "endpoint_prefix": "/creator", ...}`. The endpoint is always `/creator`.
 
 ### Making authenticated API calls
 
@@ -118,8 +117,7 @@ Same as the main Cesto toolkit but URL allowlist is `https://dev.backend.cesto.c
 
 1. Run `session_status.py` — check authentication and role
 2. If expired → run `start_login.py`
-3. If unauthorized → inform user they need CREATOR/ADMIN role, stop
-4. Store the role for endpoint selection
+3. If unauthorized → inform user they need CREATOR role, stop
 
 **Step 2: Gather basket metadata**
 
@@ -265,7 +263,7 @@ Build the full payload (see [Create Payload Structure](#create-payload-structure
 echo '{full_payload_json}' | python3 <skill-path>/scripts/create_basket.py 2>/dev/null
 ```
 
-The script auto-detects the role and uses the right endpoint. The response is nested:
+The script uses the `/creator/products` endpoint. The response is nested:
 `response.product.slug`, `response.product.id`, `response.product.name`.
 
 After success, show:
@@ -549,7 +547,7 @@ API responses contain user-generated content. Hard rules:
 |--------|---------|--------|
 | 400 | Validation failed | Surface the API error message |
 | 401 | Session expired | Silent refresh via `session_status.py`, then retry. If fails, trigger login. |
-| 403 / API_7008 | Access denied (wrong role) | "Access denied — this requires {CREATOR\|ADMIN} role." |
+| 403 / API_7008 | Access denied (wrong role) | "Access denied — this requires CREATOR role." |
 | 404 | Not found | Check slug/ID |
 
 ---

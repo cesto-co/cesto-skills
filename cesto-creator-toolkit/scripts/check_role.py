@@ -8,8 +8,7 @@ Usage:
 
 Output:
   {"role": "CREATOR", "address": "6APV...", "id": "...", "endpoint_prefix": "/creator"}
-  {"role": "ADMIN", "address": "6APV...", "id": "...", "endpoint_prefix": "/admin"}
-  {"error": true, "message": "Access denied. Your role is USER, but CREATOR or ADMIN is required."}
+  {"error": true, "message": "Access denied. Your role is USER, but CREATOR is required."}
 """
 
 import sys
@@ -18,7 +17,7 @@ import json, urllib.request
 from _store import read_session, ACCESS_KEY
 
 BASE_URL = "https://dev.backend.cesto.co"
-ALLOWED_ROLES = {"CREATOR": "/creator", "ADMIN": "/admin"}
+ALLOWED_ROLES = {"CREATOR": "/creator"}
 
 _session = read_session()
 if _session is None:
@@ -51,6 +50,6 @@ if role in ALLOWED_ROLES:
 else:
     print(json.dumps({
         "error": True,
-        "message": f"Access denied. Your role is {role}, but CREATOR or ADMIN is required.",
+        "message": f"Access denied. Your role is {role}, but CREATOR is required.",
     }))
     sys.exit(1)

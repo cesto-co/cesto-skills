@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Check Cesto session status and verify CREATOR/ADMIN role.
+Check Cesto session status and verify CREATOR role.
 Returns JSON with status, wallet address, and role — never sensitive values.
 
 Statuses:
   valid        — session is active, role verified
   refreshed    — session was renewed, role verified
   expired      — session expired or file missing, login required
-  unauthorized — session valid but user lacks CREATOR/ADMIN role
+  unauthorized — session valid but user lacks CREATOR role
 """
 
 import sys
@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from _store import read_session, write_session, ACCESS_KEY, REFRESH_KEY
 
 BASE_URL = "https://dev.backend.cesto.co"
-ALLOWED_ROLES = ["CREATOR", "ADMIN"]
+ALLOWED_ROLES = ["CREATOR"]
 
 
 def _check_role(access_token):
@@ -58,7 +58,7 @@ def main():
         else:
             print(json.dumps({
                 "status": "unauthorized", "wallet": wallet, "role": role,
-                "message": f"CREATOR or ADMIN role required. Your role is {role}."
+                "message": f"CREATOR role required. Your role is {role}."
             }))
     elif now < _exp2:
         req = urllib.request.Request(
@@ -85,7 +85,7 @@ def main():
             else:
                 print(json.dumps({
                     "status": "unauthorized", "wallet": wallet, "role": role,
-                    "message": f"CREATOR or ADMIN role required. Your role is {role}."
+                    "message": f"CREATOR role required. Your role is {role}."
                 }))
         except Exception:
             print(json.dumps({"status": "expired"}))

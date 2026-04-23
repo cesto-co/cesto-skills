@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Update an existing product basket (metadata only, no rebalance).
-Reads partial update payload from stdin and PUTs to the role-appropriate endpoint.
+Reads partial update payload from stdin and PUTs to the creator endpoint.
 
 Usage:
   echo '{"product": {...}, "workflow": {...}, "version": {...}}' | python3 update_basket.py --product-id <id>
@@ -16,11 +16,11 @@ import json, urllib.request
 from _store import read_session, ACCESS_KEY
 
 BASE_URL = "https://dev.backend.cesto.co"
-ROLE_ENDPOINTS = {"CREATOR": "/creator/products", "ADMIN": "/admin/products"}
+ENDPOINT = "/creator/products"
 
 
-def _get_role(token):
-    """Fetch user role from /users/me."""
+def _check_creator(token):
+    """Fetch user role from /users/me and verify it is CREATOR."""
     try:
         req = urllib.request.Request(f"{BASE_URL}/users/me")
         req.add_header("Authorization", f"Bearer {token}")
@@ -62,14 +62,13 @@ def main():
 
     token = _session[ACCESS_KEY]
 
-    # Determine endpoint from role
-    role = _get_role(token)
-    if role not in ROLE_ENDPOINTS:
-        print(json.dumps({"error": True, "message": f"Access denied. Your role is {role}, but CREATOR or ADMIN is required."}))
+    # Verify CREATOR role
+    role = _check_creator(token)
+    if role != "CREATOR":
+        print(json.dumps({"error": True, "message": f"Access denied. Your role is {role}, but CREATOR is required."}))
         sys.exit(1)
 
-    endpoint = ROLE_ENDPOINTS[role]
-    url = f"{BASE_URL}{endpoint}/{product_id}"
+    url = f"{BASE_URL}{ENDPOINT}/{product_id}"
 
     # PUT
     body = json.dumps(payload).encode()

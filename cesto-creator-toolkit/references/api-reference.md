@@ -12,15 +12,12 @@ Base URL: `https://dev.backend.cesto.co`
 6. [Prediction Market — Detail](#6-prediction-market--detail)
 7. [Upload Thumbnail](#7-upload-thumbnail)
 8. [Simulate Workflow](#8-simulate-workflow)
-9. [Create Product (Creator)](#9-create-product-creator)
-10. [Create Product (Admin)](#10-create-product-admin)
-11. [Update Product (Creator)](#11-update-product-creator)
-12. [Update Product (Admin)](#12-update-product-admin)
-13. [Create Version / Rebalance (Creator)](#13-create-version--rebalance-creator)
-14. [Create Version / Rebalance (Admin)](#14-create-version--rebalance-admin)
-15. [List Creator's Products](#15-list-creators-products)
-16. [Product Detail](#16-product-detail)
-17. [Workflow Node Types](#17-workflow-node-types)
+9. [Create Product](#9-create-product)
+10. [Update Product](#10-update-product)
+11. [Create Version / Rebalance](#11-create-version--rebalance)
+12. [List Creator's Products](#12-list-creators-products)
+13. [Product Detail](#13-product-detail)
+14. [Workflow Node Types](#14-workflow-node-types)
 
 ---
 
@@ -60,7 +57,7 @@ Returns all supported tokens on the platform.
 }
 ```
 
-Roles: `USER`, `CREATOR`, `ADMIN`. Only CREATOR and ADMIN can create/edit products.
+Roles: `USER`, `CREATOR`, `ADMIN`. Only CREATOR can create/edit products via this skill.
 
 ---
 
@@ -189,15 +186,9 @@ Response includes `analytics.aggregates.tokenPerformance` with PnL, APY, and per
 
 ---
 
-## 9. Create Product (Creator)
+## 9. Create Product
 
 **POST** `/creator/products` — Bearer token required (CREATOR role)
-
-## 10. Create Product (Admin)
-
-**POST** `/admin/products` — Bearer token required (ADMIN role)
-
-Both endpoints accept the same body:
 
 ```json
 {
@@ -245,25 +236,17 @@ Response: Created product object with `id`, `slug`.
 
 ---
 
-## 11. Update Product (Creator)
+## 10. Update Product
 
 **PUT** `/creator/products/{productId}` — Bearer token required (CREATOR role)
-
-## 12. Update Product (Admin)
-
-**PUT** `/admin/products/{productId}` — Bearer token required (ADMIN role)
 
 Same body structure as create, but all fields optional within each sub-object.
 
 ---
 
-## 13. Create Version / Rebalance (Creator)
+## 11. Create Version / Rebalance
 
 **POST** `/creator/products/{productId}/versions` — Bearer token required (CREATOR role)
-
-## 14. Create Version / Rebalance (Admin)
-
-**POST** `/admin/products/{productId}/versions` — Bearer token required (ADMIN role)
 
 ```json
 {
@@ -287,7 +270,7 @@ Same body structure as create, but all fields optional within each sub-object.
 
 ---
 
-## 15. List Creator's Products
+## 12. List Creator's Products
 
 **GET** `/products?mine=true` — Bearer token required
 
@@ -308,7 +291,7 @@ Returns array of the creator's own products:
 
 ---
 
-## 16. Product Detail
+## 13. Product Detail
 
 **GET** `/products/{slug_or_id}` — Auth optional (enriched with auth)
 
@@ -317,7 +300,7 @@ about, risk, resources, tokenPerformance, etc.
 
 ---
 
-## 17. Workflow Node Types
+## 14. Workflow Node Types
 
 **GET** `/products/nodes` — No auth required
 
