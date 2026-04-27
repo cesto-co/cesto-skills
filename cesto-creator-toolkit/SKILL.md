@@ -13,12 +13,12 @@ description: >
 
 # Creator Toolkit
 
-Build, edit, and rebalance product baskets on the [Cesto](https://www.dev.app.cesto.co) platform. This skill
+Build, edit, and rebalance product baskets on the [Cesto](https://app.cesto.co) platform. This skill
 is for users with the **CREATOR** role only. It supports token swap baskets, prediction market
 baskets (Polymarket/Kalshi), and mixed baskets combining both.
 
-**Backend URL:** `https://dev.backend.cesto.co`
-**Frontend URL:** `https://www.dev.app.cesto.co`
+**Backend URL:** `https://backend.cesto.co`
+**Frontend URL:** `https://app.cesto.co`
 
 ---
 
@@ -80,7 +80,7 @@ python3 <skill-path>/scripts/start_login.py 2>/dev/null
 ```
 
 Same behavior as the main Cesto toolkit — creates session, opens browser to
-`https://www.dev.app.cesto.co/cli-auth?session={SESSION_ID}`, polls for completion.
+`https://app.cesto.co/cli-auth?session={SESSION_ID}`, polls for completion.
 
 ### Role check (standalone)
 
@@ -96,7 +96,7 @@ Returns `{"role": "CREATOR", "endpoint_prefix": "/creator", ...}`. The endpoint 
 python3 <skill-path>/scripts/api_request.py <METHOD> <URL> [JSON_BODY] 2>/dev/null
 ```
 
-Same as the main Cesto toolkit but URL allowlist is `https://dev.backend.cesto.co`.
+Same as the main Cesto toolkit but URL allowlist is `https://backend.cesto.co`.
 
 ---
 
@@ -277,7 +277,7 @@ After success, show:
 | SOL            | 40%       |
 | BTC $150k YES  | 30%       |
 
-View your basket: https://www.dev.app.cesto.co/product/{slug_from_response}
+View your basket: https://app.cesto.co/product/{slug_from_response}
 ```
 
 **Important:** Use the `slug` from the API response for the link, not the one you generated — the backend may append random characters to ensure uniqueness.

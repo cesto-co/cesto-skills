@@ -30,7 +30,7 @@ import sys
 sys.dont_write_bytecode = True
 import json, urllib.request
 
-BASE_URL = "https://dev.backend.cesto.co"
+BASE_URL = "https://backend.cesto.co"
 
 
 def main():

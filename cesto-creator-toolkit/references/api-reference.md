@@ -1,6 +1,6 @@
 # Creator Toolkit — API Reference
 
-Base URL: `https://dev.backend.cesto.co`
+Base URL: `https://backend.cesto.co`
 
 ## Table of Contents
 

@@ -15,7 +15,7 @@ sys.dont_write_bytecode = True
 import json, os, tempfile, urllib.request, uuid
 from _store import read_session, ACCESS_KEY
 
-BASE_URL = "https://dev.backend.cesto.co"
+BASE_URL = "https://backend.cesto.co"
 
 
 def _download_image(url):

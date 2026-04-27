@@ -16,7 +16,7 @@ import json, base64, urllib.request
 from datetime import datetime, timezone
 from _store import read_session, write_session, ACCESS_KEY, REFRESH_KEY
 
-BASE_URL = "https://dev.backend.cesto.co"
+BASE_URL = "https://backend.cesto.co"
 ALLOWED_ROLES = ["CREATOR"]
 
 

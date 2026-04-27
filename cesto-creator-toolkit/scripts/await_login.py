@@ -21,7 +21,7 @@ import json, time, base64, urllib.request
 from datetime import datetime, timezone
 from _store import write_session, ACCESS_KEY, REFRESH_KEY
 
-BASE_URL = "https://dev.backend.cesto.co"
+BASE_URL = "https://backend.cesto.co"
 TIMEOUT = 15
 MAX_ATTEMPTS = 100
 POLL_INTERVAL = 3

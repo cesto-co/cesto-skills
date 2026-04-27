@@ -10,8 +10,8 @@ Usage:
   python3 api_request.py <METHOD> <URL> [JSON_BODY]
 
 Examples:
-  python3 api_request.py GET https://dev.backend.cesto.co/tokens
-  python3 api_request.py POST https://dev.backend.cesto.co/creator/products '{"product":{...}}'
+  python3 api_request.py GET https://backend.cesto.co/tokens
+  python3 api_request.py POST https://backend.cesto.co/creator/products '{"product":{...}}'
 """
 
 import sys
@@ -21,7 +21,7 @@ import json, urllib.request
 from _store import read_session, ACCESS_KEY
 
 ALLOWED_ORIGINS = [
-    "https://dev.backend.cesto.co",
+    "https://backend.cesto.co",
 ]
 
 if len(sys.argv) < 3:

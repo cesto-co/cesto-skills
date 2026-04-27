@@ -14,7 +14,7 @@ sys.dont_write_bytecode = True
 import json, urllib.request
 from _store import read_session, ACCESS_KEY
 
-BASE_URL = "https://dev.backend.cesto.co"
+BASE_URL = "https://backend.cesto.co"
 
 _session = read_session()
 if _session is None:

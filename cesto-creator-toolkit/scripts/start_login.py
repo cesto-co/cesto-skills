@@ -19,8 +19,8 @@ from datetime import datetime, timezone
 sys.dont_write_bytecode = True
 from _store import write_session as _write_session_dat
 
-BASE_URL = "https://dev.backend.cesto.co"
-APP_URL = "https://www.dev.app.cesto.co"
+BASE_URL = "https://backend.cesto.co"
+APP_URL = "https://app.cesto.co"
 TIMEOUT = 15
 MAX_ATTEMPTS = 100
 POLL_INTERVAL = 3

@@ -14,7 +14,7 @@ import sys
 sys.dont_write_bytecode = True
 import json, urllib.request
 
-BACKEND_URL = "https://dev.backend.cesto.co"
+BACKEND_URL = "https://backend.cesto.co"
 JUPITER_PRICE_URL = "https://lite-api.jup.ag/price/v3"
 
 
