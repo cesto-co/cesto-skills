@@ -1,29 +1,46 @@
 #!/usr/bin/env python3
 """
-Simulate a basket workflow definition via the /positions/simulate endpoint.
-Reads the workflow definition JSON from stdin.
+Simulate a basket workflow definition via POST /positions/simulate.
+
+Public endpoint — no auth required. The definition must be the new
+bucket-model shape (see references/workflow-definition.md).
 
 Usage:
-  echo '{"definition": {...}, "amount": 100}' | python3 simulate_basket.py
-
-  Or with a file:
-  python3 simulate_basket.py < definition.json
+  echo '{"definition": {...}, "amount": 100, "refresh": true}' | python3 simulate_basket.py
 
 Input JSON shape:
   {
     "definition": {
-      "id": "temp-simulation",
-      "name": "...",
-      "nodes": [...],
-      "connections": [...],
-      "tokenAllocations": [...]
+      "bucket": {
+        "mode": "parallel",
+        "nodes": [
+          {
+            "id": "swap-sol",
+            "nodeType": "swap.token",
+            "submitMethod": "jupiter",
+            "amount": {"percentage": 100},
+            "parameters": {
+              "chain": "solana",
+              "fromToken": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+              "toToken":   "So11111111111111111111111111111111111111112",
+              "recipient": "$userAddress",
+              "slippage": 50,
+              "purpose": "buy",
+              "protocol": "jupiter"
+            }
+          }
+        ]
+      }
     },
     "amount": 100,
-    "refresh": true
+    "refresh": true,
+    "timeRange": "1y"
   }
 
 Output:
-  Formatted simulation analytics.
+  Formatted analytics: aggregate netPnL/APY/return at 7d/30d/1y windows, plus
+  per-node breakdown (current price, price changes), plus predictionPerformance
+  for baskets that include prediction.open nodes.
 """
 
 import sys
