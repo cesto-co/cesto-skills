@@ -1,34 +1,75 @@
 #!/usr/bin/env python3
 """
-Update an existing product basket (metadata only, no rebalance).
-Reads partial update payload from stdin and PUTs to the creator endpoint.
+Update an existing product basket via PUT /creator/products/:id.
+
+Reads a partial JSON payload from stdin and PUTs it. Only send fields you
+want to change. To change allocations (the workflow definition), use
+rebalance_basket.py instead — it creates a new version.
+
+The server silently strips `product.isActive` and `product.isPublished` for
+creator-role callers; admins can flip them server-side, but this skill
+enforces the same DRAFT-only behavior for admins (see ownership check
+below). Cover image, content fields, etc. all work the same for both roles.
+
+Where each field belongs:
+  product.*   — name, description, category, tags, logoUrl, aiGenerateThumbnail,
+                pointsMultiplier, creatorFeeSharePercentage, metadata
+  workflow.*  — name, description, category, tags, definition (rare — use rebalance instead)
+  version.*   — changelog, minimumInvestment, isDeprecated, inputTokenMint,
+                inputTokenDecimals, about, riskNotes, resources
+                (updates the LATEST version's metadata)
+
+For setting `label`, `riskLevel`, `estimatedApy`, `isStable` on a specific
+version, use update_version_metadata.py instead.
+
+Ownership rule (skill-enforced):
+  The backend lets admins edit any product via this endpoint. This skill
+  refuses to do that — both creators and admins may only edit baskets they
+  themselves created. The pre-flight fetches the product and refuses if
+  `createdBy` doesn't match the caller's id.
 
 Usage:
-  echo '{"product": {...}, "workflow": {...}, "version": {...}}' | python3 update_basket.py --product-id <id>
+  echo '<partial payload>' | python3 update_basket.py --product-id <product-id>
 
 Output:
-  The updated product response from the API.
+  The updated product object.
 """
 
 import sys
 sys.dont_write_bytecode = True
-import json, urllib.request
+import json
+import urllib.error
+import urllib.request
+
 from _store import read_session, ACCESS_KEY
 
 BASE_URL = "https://backend.cesto.co"
 ENDPOINT = "/creator/products"
 
 
-def _check_creator(token):
-    """Fetch user role from /users/me and verify it is CREATOR."""
+def _http(method, path, token, body=None, timeout=30):
+    url = f"{BASE_URL}{path}"
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(url, data=data, method=method)
+    req.add_header("Authorization", f"Bearer {token}")
+    if data is not None:
+        req.add_header("Content-Type", "application/json")
     try:
-        req = urllib.request.Request(f"{BASE_URL}/users/me")
-        req.add_header("Authorization", f"Bearer {token}")
-        resp = urllib.request.urlopen(req, timeout=15)
-        user = json.loads(resp.read().decode())
-        return user.get("role", "")
-    except Exception:
-        return None
+        resp = urllib.request.urlopen(req, timeout=timeout)
+        return json.loads(resp.read().decode()), None
+    except urllib.error.HTTPError as e:
+        body_text = e.read().decode()
+        try:
+            err = json.loads(body_text)
+        except Exception:
+            err = {"message": body_text}
+        return None, {"status": e.code, **err}
+    except Exception as e:
+        return None, {"message": str(e)}
+
+
+def _get_me(token):
+    return _http("GET", "/users/me", token, timeout=15)
 
 
 def main():
@@ -55,42 +96,45 @@ def main():
         sys.exit(1)
 
     # Get session
-    _session = read_session()
-    if _session is None:
+    session = read_session()
+    if session is None:
         print(json.dumps({"error": True, "message": "No valid session found. Please log in first."}))
         sys.exit(1)
+    token = session[ACCESS_KEY]
 
-    token = _session[ACCESS_KEY]
-
-    # Verify CREATOR role
-    role = _check_creator(token)
-    if role != "CREATOR":
-        print(json.dumps({"error": True, "message": f"Access denied. Your role is {role}, but CREATOR is required."}))
+    # Role check.
+    me, err = _get_me(token)
+    if err:
+        print(json.dumps({"error": True, **err}))
+        sys.exit(1)
+    role = me.get("role", "")
+    if role not in ("CREATOR", "ADMIN"):
+        print(json.dumps({"error": True, "message": f"Access denied. Your role is {role}, but CREATOR or ADMIN is required."}))
         sys.exit(1)
 
-    url = f"{BASE_URL}{ENDPOINT}/{product_id}"
+    # Ownership backstop. The backend would let an admin edit anyone's
+    # product through this endpoint; we explicitly forbid that here so the
+    # skill behaves "exactly like creator" for admins.
+    product, err = _http("GET", f"{ENDPOINT}/{product_id}", token, timeout=15)
+    if err:
+        print(json.dumps({"error": True, **err}))
+        sys.exit(1)
+    if product.get("createdBy") != me.get("id"):
+        print(json.dumps({
+            "error": True,
+            "status": 403,
+            "message": "This skill only edits baskets you created yourself. Use the admin UI for cross-creator changes.",
+            "yourId": me.get("id"),
+            "productCreatedBy": product.get("createdBy"),
+        }))
+        sys.exit(1)
 
     # PUT
-    body = json.dumps(payload).encode()
-    req = urllib.request.Request(url, data=body, method="PUT")
-    req.add_header("Authorization", f"Bearer {token}")
-    req.add_header("Content-Type", "application/json")
-
-    try:
-        resp = urllib.request.urlopen(req, timeout=30)
-        result = json.loads(resp.read().decode())
-        print(json.dumps(result))
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode()
-        try:
-            err = json.loads(error_body)
-        except Exception:
-            err = {"message": error_body}
-        print(json.dumps({"error": True, "status": e.code, **err}))
+    result, err = _http("PUT", f"{ENDPOINT}/{product_id}", token, body=payload)
+    if err:
+        print(json.dumps({"error": True, **err}))
         sys.exit(1)
-    except Exception as e:
-        print(json.dumps({"error": True, "message": str(e)}))
-        sys.exit(1)
+    print(json.dumps(result))
 
 
 if __name__ == "__main__":

@@ -1,13 +1,93 @@
 #!/usr/bin/env python3
 """
-Create a product basket. Reads the full payload from stdin and POSTs
-to the creator endpoint (/creator/products).
+Create a product basket via POST /creator/products.
+
+Passthrough: reads the full JSON payload from stdin and POSTs it as-is.
+The server forces isActive=false and isPublished=false for creator-role
+callers, so the new basket is always saved as a DRAFT pending admin publish.
+
+Required server-side: either `product.logoUrl` (valid URL) or
+`product.aiGenerateThumbnail: true`. The `version` block must include
+`minimumInvestment` (base units, string).
+
+Fields NOT accepted by the create-version DTO (will 400 — forbidNonWhitelisted):
+  version.label, version.riskLevel, version.estimatedApy, version.isStable,
+  version.tradingSchedule
+Set those after creation with update_version_metadata.py.
 
 Usage:
-  echo '{"product": {...}, "workflow": {...}, "version": {...}}' | python3 create_basket.py
+  echo '<payload-json>' | python3 create_basket.py
+
+Example payload (mixed open basket):
+  {
+    "product": {
+      "name": "Football Glory",
+      "description": "European football meets crypto",
+      "category": "prediction",
+      "tags": ["football", "polymarket"],
+      "logoUrl": "https://res.cloudinary.com/.../cover.png"
+    },
+    "workflow": {
+      "name": "Football Glory",
+      "description": "European football meets crypto",
+      "category": "prediction",
+      "definition": {
+        "bucket": {
+          "mode": "parallel",
+          "nodes": [
+            {
+              "id": "swap-sol",
+              "nodeType": "swap.token",
+              "submitMethod": "jupiter",
+              "amount": {"percentage": 40},
+              "parameters": {
+                "chain": "solana",
+                "fromToken": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "toToken":   "So11111111111111111111111111111111111111112",
+                "recipient": "$userAddress",
+                "slippage": 50,
+                "purpose": "buy",
+                "protocol": "jupiter"
+              }
+            },
+            {
+              "id": "pred-btc150k-yes",
+              "nodeType": "prediction.open",
+              "submitMethod": "rpc",
+              "amount": {"percentage": 60},
+              "parameters": {
+                "protocol": "polymarket",
+                "marketTicker": "POLY-573656",
+                "eventTicker":  "POLY-36173",
+                "seriesTicker": "POLY-36173",
+                "title": "Bitcoin $150k by Dec 2026",
+                "side": "YES",
+                "closeTime": 1798776000,
+                "userWallet": "$userAddress",
+                "slippageBps": 500
+              }
+            }
+          ]
+        }
+      }
+    },
+    "version": {
+      "changelog": "Initial version",
+      "minimumInvestment": "10000000",
+      "about": "Long-form strategy description, >= 20 chars.",
+      "riskNotes": "**No Liquidation Risk** — ...",
+      "resources": "**Thesis** — ..."
+    }
+  }
 
 Output:
-  The created product response from the API (includes id, slug).
+  {
+    "product":        { "id": "...", "slug": "...", "name": "...", "isActive": false, "isPublished": false, ... },
+    "productVersion": { "id": "...", "version": 1, "minimumInvestment": "...", ... }
+  }
+
+Capture `product.slug` for the preview URL and `productVersion.id` for
+follow-up calls to update_version_metadata.py.
 """
 
 import sys
@@ -49,8 +129,8 @@ def main():
 
     # Verify CREATOR role
     role = _check_creator(token)
-    if role != "CREATOR":
-        print(json.dumps({"error": True, "message": f"Access denied. Your role is {role}, but CREATOR is required."}))
+    if role not in ("CREATOR", "ADMIN"):
+        print(json.dumps({"error": True, "message": f"Access denied. Your role is {role}, but CREATOR or ADMIN is required."}))
         sys.exit(1)
 
     url = f"{BASE_URL}{ENDPOINT}"
