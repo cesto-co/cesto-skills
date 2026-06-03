@@ -43,6 +43,13 @@ pre-flight against `/users/me` → `createdBy`; the agent should also start from
 `fetch_my_baskets.py` (which is server-scoped to the caller via `?mine=true`) and
 never let the user paste a slug for a basket they didn't create.
 
+**Publication guardrail.** This skill never publishes a basket. The backend honors
+`isActive` / `isPublished` from admin payloads, so without a client-side strip an
+admin agent could accidentally take a basket live. `create_basket.py` and
+`update_basket.py` strip those fields before sending, regardless of role — every
+basket created or edited through the skill stays a DRAFT. To actually publish,
+use the frontend admin UI.
+
 ---
 
 ## Reference files do the heavy lifting
@@ -294,8 +301,7 @@ Build the payload. Reference: [`references/api-reference.md` §7](references/api
 ```jsonc
 {
   "product": {
-    "name": "{Title}",
-    "slug": "{toSlug(Title)}",            // required by the DTO; backend overwrites with toSlug(name) anyway
+    "name": "{Title}",                     // create_basket.py auto-derives slug from this
     "description": "{Description}",
     "category": "{derived category}",
     "tags": [],
@@ -373,11 +379,9 @@ Tell the Cesto team or an admin when you'd like it published.
 ```
 ✅ {Title} saved as DRAFT (v1)
 
-Status: DRAFT — you can publish it yourself via the admin UI when ready
-(POST /admin/products/:id/toggle-active and POST /admin/products/versions/:id/publish).
-This skill keeps you in the same draft-first flow as a creator on purpose.
-
-Preview: https://app.cesto.co/product/{slug}
+Status: DRAFT — this skill never publishes baskets, even for admins. When you're
+ready to take it live, do so from the frontend admin UI. Preview at
+https://app.cesto.co/product/{slug} in the meantime.
 ```
 
 ---
@@ -420,7 +424,8 @@ Flow C.
 
    **ADMIN:**
    ```
-   ✏️ Updated {Title}. Still a DRAFT — publish via the admin UI when ready.
+   ✏️ Updated {Title}. Still a DRAFT — this skill won't publish it; flip it
+   live from the frontend admin UI when ready.
    Preview: https://app.cesto.co/product/{slug}
    ```
 
@@ -597,9 +602,10 @@ Preview: https://app.cesto.co/product/{slug}
 ```
 ✅ {Title} v{N} saved as DRAFT
 
-The new allocations are saved but not published — flip them live via the admin UI
-when ready (POST /admin/products/versions/:id/publish). Existing investors pick up
-the new mix once they rebalance their position (or auto-rebalance kicks in).
+The new allocations are saved but not published — this skill won't publish them.
+Flip the new version live from the frontend admin UI when ready. Existing
+investors pick up the new mix once they rebalance their position (or
+auto-rebalance kicks in).
 
 Preview: https://app.cesto.co/product/{slug}
 ```

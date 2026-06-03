@@ -18,13 +18,13 @@ Set those after creation with update_version_metadata.py.
 Usage:
   echo '<payload-json>' | python3 create_basket.py
 
-Example payload (mixed open basket). Note: `product.slug` is required by the DTO;
-the controller overwrites it with toSlug(name) but validation runs first.
+Example payload (mixed open basket). The script auto-derives `product.slug`
+from `product.name` if you omit it — the controller overwrites server-side
+anyway, so you never need to compute the slug yourself.
 
   {
     "product": {
       "name": "Football Glory",
-      "slug": "football-glory",
       "description": "European football meets crypto",
       "category": "prediction",
       "tags": ["football", "polymarket"],
@@ -97,6 +97,7 @@ depending on the codepath; the script extracts it for you under `versionId`.
 Capture `productSlug` for the preview URL.
 """
 
+import re
 import sys
 sys.dont_write_bytecode = True
 import json, urllib.request
@@ -104,6 +105,17 @@ from _store import read_session, ACCESS_KEY
 
 BASE_URL = "https://backend.cesto.co"
 ENDPOINT = "/creator/products"
+
+
+def _to_slug(name):
+    """Mirror the backend's toSlug: lowercase, non-alphanumerics → hyphens,
+    collapse runs, trim. Returns '' if name yields nothing usable."""
+    if not isinstance(name, str):
+        return ""
+    s = name.lower().strip()
+    s = re.sub(r"[^a-z0-9]+", "-", s)
+    s = re.sub(r"-+", "-", s).strip("-")
+    return s
 
 
 def _check_creator(token):
@@ -139,6 +151,24 @@ def main():
     if role not in ("CREATOR", "ADMIN"):
         print(json.dumps({"error": True, "message": f"Access denied. Your role is {role}, but CREATOR or ADMIN is required."}))
         sys.exit(1)
+
+    # Auto-derive slug if missing. CreateProductDto.slug is required by class-
+    # validator (non-empty string), but the controller overwrites it with
+    # toSlug(name) before persisting. So whatever we send is replaced — we
+    # just need SOMETHING non-empty to clear validation. Deriving here means
+    # the agent never has to remember to include it.
+    product = payload.get("product") if isinstance(payload.get("product"), dict) else None
+    if product is not None and not product.get("slug"):
+        product["slug"] = _to_slug(product.get("name", "")) or "basket"
+
+    # Publication guardrail. The backend honors isActive/isPublished from admin
+    # payloads, which would let an admin agent (or a typo) take a basket live
+    # via the skill. This skill never publishes — strip those fields client-side
+    # for BOTH roles so a basket created here is always a DRAFT. Publication
+    # is a frontend-only action.
+    if isinstance(payload.get("product"), dict):
+        payload["product"].pop("isActive", None)
+        payload["product"].pop("isPublished", None)
 
     url = f"{BASE_URL}{ENDPOINT}"
 

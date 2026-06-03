@@ -129,6 +129,14 @@ def main():
         }))
         sys.exit(1)
 
+    # Publication guardrail. PUT /creator/products/:id honors isActive and
+    # isPublished from admin payloads — confirmed in live testing. Strip them
+    # client-side for BOTH roles so this skill never publishes a basket.
+    # Publication is a frontend-only action.
+    if isinstance(payload.get("product"), dict):
+        payload["product"].pop("isActive", None)
+        payload["product"].pop("isPublished", None)
+
     # PUT
     result, err = _http("PUT", f"{ENDPOINT}/{product_id}", token, body=payload)
     if err:

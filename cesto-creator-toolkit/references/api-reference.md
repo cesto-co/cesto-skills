@@ -183,24 +183,26 @@ Public. Run a workflow definition against historical data to preview performance
 Auth + `CREATOR` (or `ADMIN`) role. Creates a product plus its first ProductVersion atomically.
 
 **Important constraints enforced server-side**
-- `isActive` and `isPublished` are **forced to `false`** for creator-role callers
-  server-side. Admins *could* override via `PUT /creator/products/:id`, but the skill
-  refuses to do so — admins go through this skill in the same DRAFT-first mode as
-  creators. To actually publish, hit `/admin/*` directly.
-- `slug` is required by the DTO (any non-empty string), but the controller overwrites it with `toSlug(name)` before persisting (lowercased, hyphenated, deduplicated with a random suffix on collision). Send `slug: toSlug(name)` to satisfy validation; the backend's value wins regardless.
+- `isActive` and `isPublished` are honored from admin payloads server-side, so
+  without a client-side strip an admin could take a basket live via this endpoint.
+  `create_basket.py` strips both fields before sending, for both roles, so the
+  skill never publishes a basket. Publication is a frontend-only action.
+- `slug` is required by the DTO (any non-empty string), but the controller overwrites it with `toSlug(name)` before persisting (lowercased, hyphenated, deduplicated with a random suffix on collision). The skill's `create_basket.py` auto-derives slug from name when missing — you never need to send it yourself.
 - Either `logoUrl` (valid URL) or `aiGenerateThumbnail: true` must be present. Sending neither is a 400.
 
 **Request — `CreateCreatorProductDto`**
 
 Note: `product.slug` is required by class-validator (`CreateProductDto.slug!: string`).
-Pass any non-empty slug — the controller overwrites it with `toSlug(name)` before the
-service runs. Omitting it returns 400 from the validation pipe.
+`create_basket.py` auto-derives it from `name` when missing — agents calling through
+the skill don't need to include it. If you're hitting the endpoint directly (via
+`api_request.py` or curl), pass any non-empty slug; the controller overwrites it
+with `toSlug(name)` server-side regardless.
 
 ```jsonc
 {
   "product": {
     "name": "Football Glory",                       // required, ≤200 chars
-    "slug": "football-glory",                       // required by DTO; controller overwrites with toSlug(name)
+    // slug: omit when calling via create_basket.py; auto-derived from name
     "description": "European football meets crypto",// optional, ≤1000 chars
     "category": "prediction",                       // optional, ≤100 chars — auto-derive: prediction/leverage/pool/swap
     "tags": ["football", "polymarket"],             // optional string[]
@@ -304,7 +306,9 @@ Auth + `CREATOR`/`ADMIN`. Partial update — only send fields you want changed.
     "pointsMultiplier": 1,
     "creatorFeeSharePercentage": 0.1,// 0-1; null clears
     "metadata": null
-    // isActive / isPublished are silently stripped for non-ADMIN
+    // isActive / isPublished are honored from admin payloads server-side, but
+    // update_basket.py strips them client-side for BOTH roles — the skill
+    // never publishes a basket. Publish from the frontend admin UI instead.
   },
   "workflow": {                      // optional partial — usually omit; use POST /versions for definition changes
     "name": "...",
