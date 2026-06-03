@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """
-Check Cesto session status and verify CREATOR role.
+Check Cesto session status and verify the caller has CREATOR or ADMIN role.
 Returns JSON with status, wallet address, and role — never sensitive values.
+
+Both roles drive this skill identically; the mutating scripts apply an extra
+ownership check (createdBy == /users/me.id) so admins are still constrained
+to baskets they themselves created.
 
 Statuses:
   valid        — session is active, role verified
   refreshed    — session was renewed, role verified
   expired      — session expired or file missing, login required
-  unauthorized — session valid but user lacks CREATOR role
+  unauthorized — session valid but user is not CREATOR or ADMIN
 """
 
 import sys
@@ -17,7 +21,7 @@ from datetime import datetime, timezone
 from _store import read_session, write_session, ACCESS_KEY, REFRESH_KEY
 
 BASE_URL = "https://backend.cesto.co"
-ALLOWED_ROLES = ["CREATOR"]
+ALLOWED_ROLES = ["CREATOR", "ADMIN"]
 
 
 def _check_role(access_token):
@@ -58,7 +62,7 @@ def main():
         else:
             print(json.dumps({
                 "status": "unauthorized", "wallet": wallet, "role": role,
-                "message": f"CREATOR role required. Your role is {role}."
+                "message": f"CREATOR or ADMIN role required. Your role is {role}."
             }))
     elif now < _exp2:
         req = urllib.request.Request(
@@ -85,7 +89,7 @@ def main():
             else:
                 print(json.dumps({
                     "status": "unauthorized", "wallet": wallet, "role": role,
-                    "message": f"CREATOR role required. Your role is {role}."
+                    "message": f"CREATOR or ADMIN role required. Your role is {role}."
                 }))
         except Exception:
             print(json.dumps({"status": "expired"}))

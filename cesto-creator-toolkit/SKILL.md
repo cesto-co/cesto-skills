@@ -295,6 +295,7 @@ Build the payload. Reference: [`references/api-reference.md` §7](references/api
 {
   "product": {
     "name": "{Title}",
+    "slug": "{toSlug(Title)}",            // required by the DTO; backend overwrites with toSlug(name) anyway
     "description": "{Description}",
     "category": "{derived category}",
     "tags": [],
@@ -323,10 +324,11 @@ Submit:
 echo '<payload-json>' | python3 <skill-path>/scripts/create_basket.py 2>/dev/null
 ```
 
-From the response capture:
-- `response.product.id` — the product UUID for any follow-up calls.
-- `response.product.slug` — for the preview link (backend may have suffix-randomized).
-- `response.productVersion.id` — the `versionId` for Step 11.
+From the normalized response capture:
+- `response.productId` — the product UUID for any follow-up calls.
+- `response.productSlug` — for the preview link (backend may have suffix-randomized).
+- `response.versionId` — the version row's UUID for Step 11.
+- `response.raw` — the full backend response if you need anything else.
 
 If the response has `error: true` with status 400, surface the validation message
 verbatim — almost always a definition-shape problem (see workflow-definition.md).
@@ -343,7 +345,7 @@ If they answer, build a payload and patch:
 
 ```bash
 echo '{"label": "v1.0.0", "riskLevel": "MEDIUM", "estimatedApy": null, "isStable": false}' \
-  | python3 <skill-path>/scripts/update_version_metadata.py --version-id <productVersion.id> 2>/dev/null
+  | python3 <skill-path>/scripts/update_version_metadata.py --product-id <productId> --version-id <versionId> 2>/dev/null
 ```
 
 If they skip, that's fine — the version is fully usable without these fields.
@@ -466,10 +468,12 @@ Which basket do you want to rebalance? (number, name, or slug)
 python3 <skill-path>/scripts/fetch_basket_detail.py <slug-or-id> 2>/dev/null
 ```
 
-When the caller is the owner this hits `GET /creator/products/:id` and returns the
-product plus every version. The latest version's full bucket-model definition is in
-`currentVersion.definition`; the about / risk / resources / minimumInvestment are on
-`currentVersion` directly.
+For the caller's own baskets (creator or admin), this hits `GET /creator/products/:id`
+and returns the product plus every version. For admins fetching a basket they don't
+own, the read succeeds (admins bypass server-side ownership) — but the mutating
+scripts will refuse downstream, so don't proceed past Step 5 in that case. The
+latest version's full bucket-model definition is in `currentVersion.definition`;
+the about / risk / resources / minimumInvestment are on `currentVersion` directly.
 
 ### Step 4: Show the current state to the user
 
@@ -560,11 +564,14 @@ echo '<rebalance payload>' | python3 <skill-path>/scripts/rebalance_basket.py --
 
 The script:
 - Resolves the product UUID from a slug if needed.
+- Enforces ownership (skill-side): refuses if the basket's `createdBy` doesn't
+  match `/users/me.id` — admin cross-creator rebalances are blocked here.
 - Reads all versions via `GET /creator/products/:id` and computes `nextVersion = max(version) + 1`.
 - Injects `version.version: nextVersion` into the payload.
 - POSTs to `/creator/products/:id/versions`.
+- Normalizes the response.
 
-Capture `response.version.id` from the response for the optional Step 11 patch.
+Capture `response.versionId` and `response.productId` for the optional Step 11 patch.
 
 ### Step 11: Optionally patch version metadata
 
@@ -613,10 +620,14 @@ existing version without changing its definition. Reference: [`api-reference.md`
    - "Set this version's risk level to HIGH"
    - "Bump estimated APY to 22.5"
    - "Mark version 2 as deprecated"
-4. Build the payload (only the fields being changed) and patch:
+4. Build the payload (only the fields being changed) and patch. Pass **both**
+   `--product-id` and `--version-id` — the script enforces ownership by
+   verifying `createdBy === /users/me.id` on the parent product.
+
    ```bash
    echo '{"riskLevel": "HIGH", "label": "v3.1.0"}' \
-     | python3 update_version_metadata.py --version-id <versionId> 2>/dev/null
+     | python3 update_version_metadata.py \
+         --product-id <productId> --version-id <versionId> 2>/dev/null
    ```
 5. Confirm what changed.
 
@@ -647,7 +658,7 @@ All bundled scripts output JSON. Suppress stderr with `2>/dev/null`.
 | `create_basket.py` | POST `/creator/products` (passthrough) | yes |
 | `update_basket.py --product-id <id>` | PUT `/creator/products/:id` (passthrough) | yes |
 | `rebalance_basket.py --product-id <id>` | POST `/creator/products/:id/versions` with auto-version-bump | yes |
-| `update_version_metadata.py --version-id <id>` | PUT `/creator/products/versions/:id` (passthrough) | yes |
+| `update_version_metadata.py --product-id <pid> --version-id <vid>` | PUT `/creator/products/versions/:id` with ownership pre-flight | yes |
 
 ---
 
@@ -673,7 +684,7 @@ Session keys never appear in agent output — the helper scripts manage the
 |---|---|---|
 | 400 | DTO validation failed — a field is the wrong type, missing, an unknown extra, or `definition` doesn't conform to the bucket model. | Surface the API `message` verbatim. If it mentions `definition`, re-read [`workflow-definition.md`](references/workflow-definition.md). |
 | 401 | JWT expired. | `session_status.py` refreshes automatically; if it returns `expired`, run `start_login.py`. |
-| 403 | Wrong role, or trying to act on a basket the caller doesn't own. | Tell the user: "Access denied — this skill needs CREATOR role on your own basket." |
+| 403 | Wrong role, or trying to act on a basket the caller doesn't own (admins included — the skill blocks cross-creator edits). | Tell the user: "Access denied — this skill needs CREATOR or ADMIN role on a basket you created yourself." |
 | 404 | Slug/UUID unknown, or basket is `isActive: false` and caller isn't the owner. | Verify the identifier. Drafts are visible only to their creator. |
 | 429 | Rate-limited. | Brief backoff, retry once. |
 

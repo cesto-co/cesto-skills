@@ -3,12 +3,17 @@
 Check the authenticated user's role. Returns role and endpoint prefix.
 Used by other scripts to determine which API path to use.
 
+CREATOR and ADMIN both pass — they drive the same flows through this skill.
+Ownership constraints for admins are enforced downstream by the mutating
+scripts (createdBy must match /users/me.id), not here.
+
 Usage:
   python3 check_role.py
 
 Output:
   {"role": "CREATOR", "address": "6APV...", "id": "...", "endpoint_prefix": "/creator"}
-  {"error": true, "message": "Access denied. Your role is USER, but CREATOR is required."}
+  {"role": "ADMIN",   "address": "6APV...", "id": "...", "endpoint_prefix": "/creator"}
+  {"error": true, "message": "Access denied. Your role is USER, but CREATOR or ADMIN is required."}
 """
 
 import sys
@@ -17,7 +22,8 @@ import json, urllib.request
 from _store import read_session, ACCESS_KEY
 
 BASE_URL = "https://backend.cesto.co"
-ALLOWED_ROLES = {"CREATOR": "/creator"}
+# Both roles drive this skill via the /creator namespace.
+ALLOWED_ROLES = {"CREATOR": "/creator", "ADMIN": "/creator"}
 
 _session = read_session()
 if _session is None:
@@ -50,6 +56,6 @@ if role in ALLOWED_ROLES:
 else:
     print(json.dumps({
         "error": True,
-        "message": f"Access denied. Your role is {role}, but CREATOR is required.",
+        "message": f"Access denied. Your role is {role}, but CREATOR or ADMIN is required.",
     }))
     sys.exit(1)

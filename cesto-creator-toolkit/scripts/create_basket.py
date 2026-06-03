@@ -18,10 +18,13 @@ Set those after creation with update_version_metadata.py.
 Usage:
   echo '<payload-json>' | python3 create_basket.py
 
-Example payload (mixed open basket):
+Example payload (mixed open basket). Note: `product.slug` is required by the DTO;
+the controller overwrites it with toSlug(name) but validation runs first.
+
   {
     "product": {
       "name": "Football Glory",
+      "slug": "football-glory",
       "description": "European football meets crypto",
       "category": "prediction",
       "tags": ["football", "polymarket"],
@@ -80,14 +83,18 @@ Example payload (mixed open basket):
     }
   }
 
-Output:
+Output (normalized — stable keys regardless of what the backend names them):
   {
-    "product":        { "id": "...", "slug": "...", "name": "...", "isActive": false, "isPublished": false, ... },
-    "productVersion": { "id": "...", "version": 1, "minimumInvestment": "...", ... }
+    "productId": "...",
+    "productSlug": "...",
+    "versionId":  "...",     // use this for update_version_metadata.py --version-id
+    "version":    1,
+    "raw":        { /* the full backend response, unmodified */ }
   }
 
-Capture `product.slug` for the preview URL and `productVersion.id` for
-follow-up calls to update_version_metadata.py.
+The backend's field for the version row may be `version` or `productVersion`
+depending on the codepath; the script extracts it for you under `versionId`.
+Capture `productSlug` for the preview URL.
 """
 
 import sys
@@ -100,7 +107,7 @@ ENDPOINT = "/creator/products"
 
 
 def _check_creator(token):
-    """Fetch user role from /users/me and verify it is CREATOR."""
+    """Fetch user role from /users/me. Caller verifies CREATOR or ADMIN."""
     try:
         req = urllib.request.Request(f"{BASE_URL}/users/me")
         req.add_header("Authorization", f"Bearer {token}")
@@ -127,7 +134,7 @@ def main():
 
     token = _session[ACCESS_KEY]
 
-    # Verify CREATOR role
+    # Verify CREATOR or ADMIN role
     role = _check_creator(token)
     if role not in ("CREATOR", "ADMIN"):
         print(json.dumps({"error": True, "message": f"Access denied. Your role is {role}, but CREATOR or ADMIN is required."}))
@@ -144,7 +151,20 @@ def main():
     try:
         resp = urllib.request.urlopen(req, timeout=30)
         result = json.loads(resp.read().decode())
-        print(json.dumps(result))
+
+        # Normalize: backend uses either `version` or `productVersion` depending
+        # on the codepath. Surface a stable shape so the agent doesn't have to
+        # branch on it.
+        product_obj = result.get("product") or {}
+        version_obj = result.get("productVersion") or result.get("version") or {}
+        normalized = {
+            "productId": product_obj.get("id"),
+            "productSlug": product_obj.get("slug"),
+            "versionId": version_obj.get("id"),
+            "version": version_obj.get("version"),
+            "raw": result,
+        }
+        print(json.dumps(normalized))
     except urllib.error.HTTPError as e:
         error_body = e.read().decode()
         try:

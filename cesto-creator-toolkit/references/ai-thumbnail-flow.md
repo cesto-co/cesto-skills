@@ -155,4 +155,4 @@ Then go back to whichever flow called this sub-flow (Flow A Step 10 or Flow B St
   (may automatically fall back to Gemini next time).
 - **`fellBack: true`** — informational, not an error. Mention it so the user knows
   they're seeing Gemini output even though they asked for Midjourney (or vice versa).
-- **403** — caller lost CREATOR role since auth. Re-run `session_status.py`.
+- **403** — caller lost CREATOR/ADMIN role since auth. Re-run `session_status.py`.

@@ -178,7 +178,14 @@ def main():
         print(json.dumps(result))
         sys.exit(1)
 
-    print(json.dumps(result))
+    # Normalize: backend returns either `version` or `productVersion`.
+    version_obj = result.get("productVersion") or result.get("version") or {}
+    print(json.dumps({
+        "productId": product_uuid,
+        "versionId": version_obj.get("id"),
+        "version": version_obj.get("version") or next_version,
+        "raw": result,
+    }))
 
 
 if __name__ == "__main__":

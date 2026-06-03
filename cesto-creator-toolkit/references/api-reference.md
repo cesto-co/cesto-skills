@@ -187,14 +187,20 @@ Auth + `CREATOR` (or `ADMIN`) role. Creates a product plus its first ProductVers
   server-side. Admins *could* override via `PUT /creator/products/:id`, but the skill
   refuses to do so — admins go through this skill in the same DRAFT-first mode as
   creators. To actually publish, hit `/admin/*` directly.
-- `slug` is auto-generated from `name` (lowercased, hyphenated, deduplicated with a random suffix on collision). Don't send a slug.
+- `slug` is required by the DTO (any non-empty string), but the controller overwrites it with `toSlug(name)` before persisting (lowercased, hyphenated, deduplicated with a random suffix on collision). Send `slug: toSlug(name)` to satisfy validation; the backend's value wins regardless.
 - Either `logoUrl` (valid URL) or `aiGenerateThumbnail: true` must be present. Sending neither is a 400.
 
 **Request — `CreateCreatorProductDto`**
+
+Note: `product.slug` is required by class-validator (`CreateProductDto.slug!: string`).
+Pass any non-empty slug — the controller overwrites it with `toSlug(name)` before the
+service runs. Omitting it returns 400 from the validation pipe.
+
 ```jsonc
 {
   "product": {
     "name": "Football Glory",                       // required, ≤200 chars
+    "slug": "football-glory",                       // required by DTO; controller overwrites with toSlug(name)
     "description": "European football meets crypto",// optional, ≤1000 chars
     "category": "prediction",                       // optional, ≤100 chars — auto-derive: prediction/leverage/pool/swap
     "tags": ["football", "polymarket"],             // optional string[]
@@ -232,7 +238,10 @@ Auth + `CREATOR` (or `ADMIN`) role. Creates a product plus its first ProductVers
 
 Set these *after* creation with `PUT /creator/products/versions/:versionId` (§11). The skill's two-step flow handles this automatically.
 
-**Response**
+**Response (raw)** — the version object's key is either `version` or
+`productVersion` depending on the codepath. The skill's `create_basket.py`
+normalizes this; the raw shape looks like:
+
 ```jsonc
 {
   "product": {
@@ -244,7 +253,7 @@ Set these *after* creation with `PUT /creator/products/versions/:versionId` (§1
     "isPublished": false,
     "createdAt": "..."
   },
-  "productVersion": {
+  "version": {                     // or "productVersion" — same shape, either key
     "id": "9d2c1f60-...",          // versionId — pass to step-2 PUT
     "productId": "41082d06-...",
     "version": 1,                  // always 1 on first create
@@ -260,7 +269,20 @@ Set these *after* creation with `PUT /creator/products/versions/:versionId` (§1
 }
 ```
 
-Use `product.slug` for the preview link (`https://app.cesto.co/product/{slug}`) — backend may have suffix-randomized it.
+**Normalized output from `create_basket.py`** (read this instead of the raw shape):
+
+```jsonc
+{
+  "productId":   "41082d06-...",
+  "productSlug": "football-glory",
+  "versionId":   "9d2c1f60-...",
+  "version":     1,
+  "raw":         { /* the full backend response above */ }
+}
+```
+
+Use `productSlug` for the preview link (`https://app.cesto.co/product/{slug}`) —
+backend may have suffix-randomized it.
 
 ## 8. `PUT /creator/products/:id`
 
@@ -404,7 +426,11 @@ Same field constraints as create — `label`/`riskLevel`/`estimatedApy`/`isStabl
 
 ## 11. `PUT /creator/products/versions/:versionId`
 
-Auth + `CREATOR`/`ADMIN`. Ownership-checked. Patches metadata on a specific version row — never changes the workflow definition.
+Auth + `CREATOR`/`ADMIN`. Server-side ownership is checked for creators but
+bypassed for admins. The skill's `update_version_metadata.py` enforces ownership
+client-side (refuses if the parent product's `createdBy !== /users/me.id`), so
+admins are constrained to their own versions through this skill. Patches metadata
+on a specific version row — never changes the workflow definition.
 
 **Request — `UpdateProductVersionDto` (all optional)**
 ```jsonc
