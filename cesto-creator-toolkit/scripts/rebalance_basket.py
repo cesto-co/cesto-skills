@@ -27,6 +27,7 @@ import urllib.error
 import urllib.request
 
 from _store import read_session, ACCESS_KEY
+from _common import resolve_product_uuid
 
 BASE_URL = "https://backend.cesto.co"
 
@@ -60,16 +61,6 @@ def _get_me(token):
     return user
 
 
-def _resolve_product_uuid(identifier, token):
-    """Accept either a UUID or a slug. Resolve to the canonical product UUID."""
-    # UUIDs are 36 chars with dashes; slugs aren't. Cheap heuristic.
-    if len(identifier) == 36 and identifier.count("-") == 4:
-        return identifier, None
-    # Slug → resolve via public detail endpoint.
-    detail = _http("GET", f"/products/{identifier}", token=token, timeout=15)
-    if isinstance(detail, dict) and detail.get("error"):
-        return None, detail
-    return detail.get("id"), None
 
 
 def _fetch_creator_product(product_id, token):
@@ -78,6 +69,47 @@ def _fetch_creator_product(product_id, token):
     if isinstance(product, dict) and product.get("error"):
         return None, product
     return product, None
+
+
+def _extract_percentages_from_definition(definition):
+    """Walk a bucket-model definition and return a list of percentage values."""
+    if not isinstance(definition, dict):
+        return []
+    bucket = definition.get("bucket")
+    if not isinstance(bucket, dict):
+        return []
+    nodes = bucket.get("nodes") or []
+    percentages = []
+    for node in nodes:
+        if isinstance(node, dict):
+            amount = node.get("amount")
+            if isinstance(amount, dict) and "percentage" in amount:
+                percentages.append(amount["percentage"])
+    return percentages
+
+
+def _validate_allocations(payload):
+    """
+    Inspect payload for workflow.definition and verify that node percentages
+    sum to exactly 100. Returns None if valid, or a human-readable error string.
+    """
+    workflow = payload.get("workflow") if isinstance(payload.get("workflow"), dict) else None
+    if workflow is None:
+        return None  # No workflow block — nothing to validate.
+    definition = workflow.get("definition")
+    if definition is None:
+        return None  # No definition — let the API validate.
+    percentages = _extract_percentages_from_definition(definition)
+    if not percentages:
+        return None  # Can't parse percentages — skip client-side check.
+    total = sum(percentages)
+    if total != 100:
+        return (
+            f"Allocations sum to {total}, must equal 100. "
+            f"Adjust the node percentages before submitting. "
+            f"(Found {len(percentages)} node(s): {percentages})"
+        )
+    return None
 
 
 def _compute_next_version(product):
@@ -106,9 +138,13 @@ def main():
 
     # Read payload from stdin
     try:
-        payload = json.loads(sys.stdin.read())
+        payload = json.loads(sys.stdin.read(), strict=False)
     except json.JSONDecodeError as e:
         print(json.dumps({"error": True, "message": f"Invalid JSON input: {e}"}))
+        sys.exit(1)
+
+    if not isinstance(payload, dict):
+        print(json.dumps({"error": True, "message": "Payload must be a JSON object with workflow and version."}))
         sys.exit(1)
 
     # Session
@@ -129,7 +165,7 @@ def main():
         sys.exit(1)
 
     # Resolve slug → UUID if needed.
-    product_uuid, err = _resolve_product_uuid(product_arg, token)
+    product_uuid, err = resolve_product_uuid(BASE_URL, product_arg, token)
     if err:
         print(json.dumps(err))
         sys.exit(1)
@@ -156,6 +192,13 @@ def main():
         }))
         sys.exit(1)
 
+    # Fail fast: validate allocations sum to exactly 100 before hitting the API.
+    # The backend does not enforce this — a malformed basket persists silently.
+    _alloc_err = _validate_allocations(payload)
+    if _alloc_err is not None:
+        print(json.dumps({"error": True, "message": _alloc_err}))
+        sys.exit(1)
+
     # Auto-bump version number.
     next_version = _compute_next_version(product)
 
@@ -174,6 +217,38 @@ def main():
         token=token,
         body=payload,
     )
+
+    # Version-collision retry: under a race condition or stale read the server
+    # may 400 because `next_version` is already taken (another request committed
+    # between our GET and this POST). If the 400 error message mentions
+    # "version", "duplicate", or "exists" (case-insensitive), we re-read the
+    # versions list, recompute the next number, and try once more. A second
+    # failure surfaces the original error verbatim without further retries.
+    if (
+        isinstance(result, dict)
+        and result.get("error")
+        and result.get("status") == 400
+    ):
+        err_msg = str(result.get("message") or "").lower()
+        if any(kw in err_msg for kw in ("version", "duplicate", "exists")):
+            # Re-read the product to get the freshest version list.
+            fresh_product, fetch_err = _fetch_creator_product(product_uuid, token)
+            if fresh_product is not None:
+                next_version = _compute_next_version(fresh_product)
+                payload["version"]["version"] = next_version
+                retry_result = _http(
+                    "POST",
+                    f"/creator/products/{product_uuid}/versions",
+                    token=token,
+                    body=payload,
+                )
+                # Use the retry result only if it succeeded; otherwise fall
+                # through to surface the original error.
+                if not (isinstance(retry_result, dict) and retry_result.get("error")):
+                    result = retry_result
+                # If the retry also failed, `result` still holds the original
+                # error — it will be printed below.
+
     if isinstance(result, dict) and result.get("error"):
         print(json.dumps(result))
         sys.exit(1)
@@ -189,4 +264,11 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except SystemExit:
+        raise
+    except Exception as _e:
+        import json, sys
+        print(json.dumps({"error": True, "message": f"Unexpected error: {_e}"}))
+        sys.exit(1)

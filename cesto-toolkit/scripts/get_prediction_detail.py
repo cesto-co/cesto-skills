@@ -1,20 +1,25 @@
 #!/usr/bin/env python3
 """
-Get detailed info for a single prediction event or market.
+Get detail for a single prediction event or market so a user can confirm a
+prediction leg before adding it to a community Labs basket.
+
+Public proxy endpoints — work with no session.
 
 Usage:
-  python3 get_prediction_detail.py --event POLY-36173
+  python3 get_prediction_detail.py --event POLY-89502
   python3 get_prediction_detail.py --market POLY-573656
 
 Output:
-  Full event/market detail with all outcomes, pricing, and rules.
+  Full event/market detail with markets, readable YES/NO prices ($), volume,
+  and close time. Provider is derived from the id prefix.
 """
 
 import sys
 sys.dont_write_bytecode = True
 import json, urllib.request
 
-BACKEND_URL = "https://backend.cesto.co"
+BASE_URL = "https://backend.cesto.co"
+TIMEOUT = 15
 
 # Investability floor (USD). Event markets at or below this are hidden by default;
 # override with --min-volume (0 = show all). A single --market lookup is always
@@ -30,10 +35,10 @@ def market_volume(m):
     return v if isinstance(v, (int, float)) else 0
 
 
-def _get(url, timeout=15):
+def _get(url):
     try:
         req = urllib.request.Request(url)
-        resp = urllib.request.urlopen(req, timeout=timeout)
+        resp = urllib.request.urlopen(req, timeout=TIMEOUT)
         return json.loads(resp.read().decode())
     except urllib.error.HTTPError as e:
         return {"error": True, "status": e.code, "message": e.read().decode()}
@@ -41,34 +46,39 @@ def _get(url, timeout=15):
         return {"error": True, "message": str(e)}
 
 
-def _format_market(m):
-    """Format market with readable prices."""
-    pricing = m.get("pricing", {})
+def derive_provider(_id):
+    if not _id:
+        return ""
+    if _id.startswith("POLY-"):
+        return "polymarket"
+    if _id.startswith("KX"):
+        return "kalshi"
+    return ""
+
+
+def format_market(m):
+    pricing = m.get("pricing", {}) or {}
     buy_yes = pricing.get("buyYesPriceUsd")
     buy_no = pricing.get("buyNoPriceUsd")
-    sell_yes = pricing.get("sellYesPriceUsd")
-    sell_no = pricing.get("sellNoPriceUsd")
+    mid = m.get("marketId", "")
     return {
-        "marketId": m.get("marketId", ""),
+        "marketId": mid,
+        "provider": m.get("provider") or derive_provider(mid),
         "title": m.get("title", ""),
         "status": m.get("status", ""),
         "result": m.get("result"),
         "buyYesPrice": round(buy_yes / 1_000_000, 4) if buy_yes is not None else None,
         "buyNoPrice": round(buy_no / 1_000_000, 4) if buy_no is not None else None,
-        "sellYesPrice": round(sell_yes / 1_000_000, 4) if sell_yes is not None else None,
-        "sellNoPrice": round(sell_no / 1_000_000, 4) if sell_no is not None else None,
         "volume": market_volume(m),
         "closeTime": m.get("closeTime"),
         "outcomes": m.get("outcomes", []),
         "outcomePrices": m.get("outcomePrices", []),
-        "marketOptions": m.get("marketOptions", []),
         "rulesPrimary": m.get("rulesPrimary", ""),
     }
 
 
 def main():
     args = sys.argv[1:]
-
     event_id = None
     market_id = None
     min_volume = MIN_VOLUME_USD
@@ -94,13 +104,15 @@ def main():
         sys.exit(1)
 
     if event_id:
-        data = _get(f"{BACKEND_URL}/prediction/events/{event_id}")
+        data = _get(f"{BASE_URL}/prediction/events/{event_id}")
         if isinstance(data, dict) and data.get("error"):
             print(json.dumps(data))
             sys.exit(1)
-
-        meta = data.get("metadata", {})
-        raw = data.get("markets", [])
+        # Event detail is NOT wrapped in a `data` envelope.
+        ev = data.get("data", data) if isinstance(data, dict) else {}
+        meta = ev.get("metadata", {}) or {}
+        eid = ev.get("eventId", "")
+        raw = ev.get("markets", [])
         kept = sorted(
             (m for m in raw if market_volume(m) > min_volume),
             key=market_volume,
@@ -108,32 +120,32 @@ def main():
         )
         result = {
             "type": "event",
-            "eventId": data.get("eventId", ""),
+            "eventId": eid,
+            "provider": derive_provider(eid),
             "title": meta.get("title", ""),
-            "subtitle": meta.get("subtitle", ""),
-            "category": data.get("category", ""),
-            "isActive": data.get("isActive", False),
-            "isLive": data.get("isLive", False),
+            "category": ev.get("category", ""),
+            "isLive": ev.get("isLive", False),
             "closeTime": meta.get("closeTime", ""),
             "imageUrl": meta.get("imageUrl", ""),
+            "volumeUsd": ev.get("volumeUsd", "0"),
             "minVolumeUsd": min_volume,
             "marketsHidden": len(raw) - len(kept),
-            "markets": [_format_market(m) for m in kept],
+            "markets": [format_market(m) for m in kept],
         }
-        print(json.dumps(result))
+        print(json.dumps(result, indent=2))
 
-    elif market_id:
-        data = _get(f"{BACKEND_URL}/prediction/markets/{market_id}")
+    else:
+        data = _get(f"{BASE_URL}/prediction/markets/{market_id}")
         if isinstance(data, dict) and data.get("error"):
             print(json.dumps(data))
             sys.exit(1)
-
+        m = data.get("data", data) if isinstance(data, dict) else {}
         result = {"type": "market"}
-        result.update(_format_market(data))
+        result.update(format_market(m))
         # A directly-requested market is always shown, but flagged for investability.
-        result["investable"] = market_volume(data) > min_volume
+        result["investable"] = market_volume(m) > min_volume
         result["minVolumeUsd"] = min_volume
-        print(json.dumps(result))
+        print(json.dumps(result, indent=2))
 
 
 if __name__ == "__main__":

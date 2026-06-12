@@ -16,7 +16,11 @@ grid generation → poll until ready → show the 4 previews → user either "us
 > illustrative covers, ~30-90s). Gemini is cleaner and more realistic (good for
 > product-style covers, faster)."
 
-## Step 2 — Pre-fill the prompt (optional but recommended)
+## Step 2 — Generate a starter prompt locally (optional but recommended)
+
+Note: `GET /thumbnails/ai/prompt-template` does NOT exist on the backend. The
+starter prompt is generated client-side by `ai_thumbnail_prompt.py` — no network
+call required. The `grid` endpoint accepts any client-supplied prompt.
 
 ```bash
 python3 <skill-path>/scripts/ai_thumbnail_prompt.py \
@@ -139,7 +143,7 @@ Then go back to whichever flow called this sub-flow (Flow A Step 10 or Flow B St
 
 | Step | Script | Purpose |
 |---|---|---|
-| 2 | `ai_thumbnail_prompt.py` | Get a starter prompt the user can edit. |
+| 2 | `ai_thumbnail_prompt.py` | Generate a starter prompt locally (client-side, no backend call). |
 | 3 | `ai_thumbnail_grid.py` | Kick off the 2×2 grid. Returns `sessionId`. |
 | 4 | `ai_thumbnail_session.py --wait` | Poll until `gridStatus="ready"`. |
 | 6A.i | `ai_thumbnail_select.py` | Pick the final quadrant. |

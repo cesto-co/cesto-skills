@@ -42,6 +42,7 @@ import urllib.error
 import urllib.request
 
 from _store import read_session, ACCESS_KEY
+from _common import resolve_product_uuid
 
 BASE_URL = "https://backend.cesto.co"
 ENDPOINT = "/creator/products"
@@ -90,9 +91,13 @@ def main():
 
     # Read payload from stdin
     try:
-        payload = json.loads(sys.stdin.read())
+        payload = json.loads(sys.stdin.read(), strict=False)
     except json.JSONDecodeError as e:
         print(json.dumps({"error": True, "message": f"Invalid JSON input: {str(e)}"}))
+        sys.exit(1)
+
+    if not isinstance(payload, dict):
+        print(json.dumps({"error": True, "message": "Payload must be a JSON object (partial product/workflow/version)."}))
         sys.exit(1)
 
     # Get session
@@ -101,6 +106,13 @@ def main():
         print(json.dumps({"error": True, "message": "No valid session found. Please log in first."}))
         sys.exit(1)
     token = session[ACCESS_KEY]
+
+    # Accept a slug or a UUID for --product-id (resolve before any /creator call).
+    product_id, rerr = resolve_product_uuid(BASE_URL, product_id, token)
+    if rerr or not product_id:
+        msg = (rerr or {}).get("message", "Could not resolve that basket id or slug.")
+        print(json.dumps({"error": True, "message": msg, **({"status": rerr.get("status")} if rerr and rerr.get("status") else {})}))
+        sys.exit(1)
 
     # Role check.
     me, err = _get_me(token)
@@ -146,4 +158,11 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except SystemExit:
+        raise
+    except Exception as _e:
+        import json, sys
+        print(json.dumps({"error": True, "message": f"Unexpected error: {_e}"}))
+        sys.exit(1)

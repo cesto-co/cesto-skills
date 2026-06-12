@@ -183,10 +183,7 @@ Public. Run a workflow definition against historical data to preview performance
 Auth + `CREATOR` (or `ADMIN`) role. Creates a product plus its first ProductVersion atomically.
 
 **Important constraints enforced server-side**
-- `isActive` and `isPublished` are honored from admin payloads server-side, so
-  without a client-side strip an admin could take a basket live via this endpoint.
-  `create_basket.py` strips both fields before sending, for both roles, so the
-  skill never publishes a basket. Publication is a frontend-only action.
+- `isActive` and `isPublished` are FORCED to false server-side on create for every role (including admins), so a created product is always a DRAFT. create_basket.py also strips them client-side as belt-and-suspenders. (Note: on UPDATE via PUT /creator/products/:id, the backend instead honors these from an admin payload — see §8.)
 - `slug` is required by the DTO (any non-empty string), but the controller overwrites it with `toSlug(name)` before persisting (lowercased, hyphenated, deduplicated with a random suffix on collision). The skill's `create_basket.py` auto-derives slug from name when missing — you never need to send it yourself.
 - Either `logoUrl` (valid URL) or `aiGenerateThumbnail: true` must be present. Sending neither is a 400.
 
@@ -238,7 +235,10 @@ with `toSlug(name)` server-side regardless.
 - `version.isStable`
 - `version.tradingSchedule`
 
-Set these *after* creation with `PUT /creator/products/versions/:versionId` (§11). The skill's two-step flow handles this automatically.
+Note: `label`, `riskLevel`, `estimatedApy`, and `isStable` are also **not** settable
+via §11 — the backend DTO accepts them without error but the service layer silently
+ignores them. They are managed by the Cesto team during review.
+`tradingSchedule` IS settable via §11 after creation.
 
 **Response (raw)** — the version object's key is either `version` or
 `productVersion` depending on the codepath. The skill's `create_basket.py`
@@ -330,7 +330,7 @@ Auth + `CREATOR`/`ADMIN`. Partial update — only send fields you want changed.
 }
 ```
 
-To bump `riskLevel` / `label` / `estimatedApy` / `isStable` on a specific version, use §11 instead.
+Note: `riskLevel`, `label`, `estimatedApy`, and `isStable` cannot be set through §11 either — the backend accepts them without error but silently ignores them. Those fields are managed by the Cesto team during review.
 
 **Response**: full updated product.
 
@@ -407,7 +407,7 @@ Auth + `CREATOR`/`ADMIN`. Creates a new version of an existing product (the crea
 }
 ```
 
-Same field constraints as create — `label`/`riskLevel`/`estimatedApy`/`isStable` are **not** accepted here. PUT them after with §11.
+Same field constraints as create — `label`/`riskLevel`/`estimatedApy`/`isStable` are **not** accepted here. Note: §11 does not persist these either — they are managed by the Cesto team during review.
 
 **Response**
 ```jsonc
@@ -436,23 +436,40 @@ client-side (refuses if the parent product's `createdBy !== /users/me.id`), so
 admins are constrained to their own versions through this skill. Patches metadata
 on a specific version row — never changes the workflow definition.
 
-**Request — `UpdateProductVersionDto` (all optional)**
+**⚠ Persistence reality — only 4 fields are actually written:**
+
+The backend's `updateProductVersion` service method only persists:
+`changelog`, `minimumInvestment`, `tradingSchedule`, `isDeprecated`.
+
+The DTO also declares `label`, `riskLevel`, `estimatedApy`, `isStable` —
+these are accepted without a validation error (no 400), but the service layer
+**silently ignores** them and they are **never written to the database**. A
+follow-up GET will show them still null/unchanged even after a 200 response.
+
+The skill's `update_version_metadata.py` strips those four fields client-side
+and includes a `"warning"` in the output so the caller gets honest feedback.
+`riskLevel`, `label`, `estimatedApy`, and `isStable` are managed by the Cesto
+team during review.
+
+**Request — `UpdateProductVersionDto` (all optional; only send what's changing)**
 ```jsonc
 {
-  "label": "v3.0.0",                      // ≤50 chars, display string
-  "changelog": "Rebalance: reduce PSG; add Real",
-  "estimatedApy": 23.5,
-  "riskLevel": "MEDIUM",                  // "LOW" | "MEDIUM" | "HIGH"
-  "minimumInvestment": "15000000",
-  "tradingSchedule": null,
-  "isStable": false,
-  "isDeprecated": false
+  "changelog": "Rebalance: reduce PSG; add Real",  // persisted ✓
+  "minimumInvestment": "15000000",                 // persisted ✓
+  "tradingSchedule": null,                         // persisted ✓
+  "isDeprecated": false                            // persisted ✓
+
+  // NOT persisted (DTO accepts, service ignores — skill strips these):
+  // "label": "v3.0.0"
+  // "estimatedApy": 23.5
+  // "riskLevel": "MEDIUM"
+  // "isStable": false
 }
 ```
 
 Flipping `isDeprecated: true → false` (re-activating a deprecated version) triggers the auto-rebalance scheduler server-side. Usually you'll only ever set this to `true` to retire a version.
 
-**Response**: the updated version object.
+**Response**: the updated version object (plus a `"warning"` key if the skill stripped any unsupported fields).
 
 ## 12. `GET /products?mine=true`
 
@@ -575,24 +592,20 @@ All endpoints require auth + `CREATOR`/`ADMIN`. They drive an interactive
 state across calls; session id is the only handle the client needs.
 
 Flow:
-1. (Optional) Fetch a starter prompt the user can edit.
+1. (Optional) Generate a starter prompt the user can edit — **client-side only**
+   (see note below).
 2. Generate a 2×2 grid → 4 preview URLs.
 3. Either **Select** one quadrant as the basket cover (returns `finalUrl` —
    use as `product.logoUrl`), or **upscale-for-download** to fetch a
    full-resolution copy without committing it as the cover.
 
-### `GET /thumbnails/ai/prompt-template`
-
-Returns a default prompt to pre-fill the user-edit box. Midjourney uses only
-the title; Gemini weaves in the description.
-
-| Param | Type | Notes |
-|---|---|---|
-| `provider` | `"midjourney" \| "gemini"` | required |
-| `title` | `string` (≤100) | required |
-| `description` | `string` (≤1000) | optional (Gemini uses it) |
-
-**Response**: `{ "prompt": "..." }`
+**Starter prompt — generated client-side, no backend endpoint:**
+`GET /thumbnails/ai/prompt-template` does **NOT** exist on the backend. Any
+request to that path is matched by `GET /thumbnails/ai/:sessionId` with
+`sessionId="prompt-template"`, returning a 404 "Thumbnail session not found".
+The starter prompt is instead generated locally by `scripts/ai_thumbnail_prompt.py`
+— the `grid` endpoint accepts any prompt the client supplies, so a server-suggested
+starter is entirely optional and works just as well when built client-side.
 
 ### `POST /thumbnails/ai/grid` — `CreateGridDto`
 

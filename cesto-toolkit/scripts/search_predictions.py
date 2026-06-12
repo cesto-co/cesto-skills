@@ -1,29 +1,42 @@
 #!/usr/bin/env python3
 """
-Search or browse prediction events and their markets.
+Search or browse prediction-market events (and their markets) so a user can
+pick prediction legs for a community Labs basket.
+
+Public proxy endpoints — work with no session.
 
 Usage:
   python3 search_predictions.py --query "bitcoin"
   python3 search_predictions.py --category crypto --filter trending
-  python3 search_predictions.py --category sports --filter live --provider polymarket
-  python3 search_predictions.py --category crypto --filter trending --min-volume 0  # show all
+  python3 search_predictions.py --category sports --filter live --limit 5
+  python3 search_predictions.py --category crypto --filter trending --min-volume 0   # show all
+
+Categories: crypto, sports, politics, economics, finance, esports, weather
+Filters:    new, live, trending
 
 Investability filter: only markets with traded volume ABOVE $100,000 (USD) are
-shown by default — illiquid markets are hidden. Each event reports `marketsHidden`.
-Override with `--min-volume <usd>`; `--min-volume 0` disables it.
+shown by default — illiquid markets are hidden when answering "which market can
+I invest in". Each event reports `marketsHidden` (count filtered out). Override
+the floor with `--min-volume <usd>`; `--min-volume 0` disables it.
 
 Output:
-  {"events": [{"eventId": "...", "title": "...", "category": "...", "markets": [...]}]}
+  {"events": [{eventId, title, category, provider, closeTime, markets:[
+     {marketId, title, side hints, buyYesPrice($), buyNoPrice($), volume, closeTime}
+  ]}]}
+
+Provider is derived from id prefix: POLY-* -> polymarket, KX* -> kalshi.
 """
 
 import sys
 sys.dont_write_bytecode = True
 import json, urllib.request, urllib.parse
 
-BACKEND_URL = "https://backend.cesto.co"
+BASE_URL = "https://backend.cesto.co"
+TIMEOUT = 15
 
-# Investability floor (USD): only markets with traded volume above this are shown
-# by default — illiquid markets are hidden. Override with --min-volume (0 = all).
+# Investability floor: only surface markets with real liquidity. Markets with
+# volume at or below this (USD) are hidden when answering "which market can I
+# invest in". Override with --min-volume (use 0 to show everything).
 MIN_VOLUME_USD = 100_000
 
 
@@ -35,7 +48,7 @@ def market_volume(m):
     return v if isinstance(v, (int, float)) else 0
 
 
-def _get(url, timeout=15):
+def _get(url):
     # The prediction proxy fans out to an upstream (Jupiter/Polymarket/Kalshi) and
     # can cold-time-out on the first hit. Retry once on a transient error; never
     # retry a real HTTPError (that's a genuine response, not a hiccup).
@@ -43,7 +56,7 @@ def _get(url, timeout=15):
     for attempt in range(2):
         try:
             req = urllib.request.Request(url)
-            resp = urllib.request.urlopen(req, timeout=timeout)
+            resp = urllib.request.urlopen(req, timeout=TIMEOUT)
             return json.loads(resp.read().decode())
         except urllib.error.HTTPError as e:
             return {"error": True, "status": e.code, "message": e.read().decode()}
@@ -52,13 +65,24 @@ def _get(url, timeout=15):
     return {"error": True, "message": str(last_err)}
 
 
-def _format_market(m):
-    """Format a market for clean output, converting micro-USD prices."""
-    pricing = m.get("pricing", {})
+def derive_provider(_id):
+    if not _id:
+        return ""
+    if _id.startswith("POLY-"):
+        return "polymarket"
+    if _id.startswith("KX"):
+        return "kalshi"
+    return ""
+
+
+def format_market(m):
+    pricing = m.get("pricing", {}) or {}
     buy_yes = pricing.get("buyYesPriceUsd")
     buy_no = pricing.get("buyNoPriceUsd")
+    mid = m.get("marketId", "")
     return {
-        "marketId": m.get("marketId", ""),
+        "marketId": mid,
+        "provider": m.get("provider") or derive_provider(mid),
         "title": m.get("title", ""),
         "status": m.get("status", ""),
         "buyYesPrice": round(buy_yes / 1_000_000, 4) if buy_yes is not None else None,
@@ -66,32 +90,29 @@ def _format_market(m):
         "volume": market_volume(m),
         "closeTime": m.get("closeTime"),
         "outcomes": m.get("outcomes", []),
-        "outcomePrices": m.get("outcomePrices", []),
-        "marketOptions": m.get("marketOptions", []),
     }
 
 
-def _format_event(e, min_volume=MIN_VOLUME_USD):
-    """Format an event, keeping only investable markets (volume > floor)."""
-    meta = e.get("metadata", {})
+def format_event(e, min_volume=MIN_VOLUME_USD):
+    meta = e.get("metadata", {}) or {}
+    eid = e.get("eventId", "")
     raw = e.get("markets", [])
+    # Keep only investable markets (volume above the floor), highest volume first.
     kept = sorted(
         (m for m in raw if market_volume(m) > min_volume),
         key=market_volume,
         reverse=True,
     )
     return {
-        "eventId": e.get("eventId", ""),
+        "eventId": eid,
+        "provider": derive_provider(eid),
         "title": meta.get("title", ""),
-        "subtitle": meta.get("subtitle", ""),
         "category": e.get("category", ""),
-        "subcategory": e.get("subcategory", ""),
-        "isActive": e.get("isActive", False),
         "isLive": e.get("isLive", False),
         "closeTime": meta.get("closeTime", ""),
         "imageUrl": meta.get("imageUrl", ""),
         "volumeUsd": e.get("volumeUsd", "0"),
-        "markets": [_format_market(m) for m in kept],
+        "markets": [format_market(m) for m in kept],
         "marketsHidden": len(raw) - len(kept),
     }
 
@@ -101,23 +122,8 @@ def main():
     params = {}
     i = 0
     while i < len(args):
-        if args[i] == "--query" and i + 1 < len(args):
-            params["query"] = args[i + 1]
-            i += 2
-        elif args[i] == "--category" and i + 1 < len(args):
-            params["category"] = args[i + 1]
-            i += 2
-        elif args[i] == "--filter" and i + 1 < len(args):
-            params["filter"] = args[i + 1]
-            i += 2
-        elif args[i] == "--provider" and i + 1 < len(args):
-            params["provider"] = args[i + 1]
-            i += 2
-        elif args[i] == "--limit" and i + 1 < len(args):
-            params["limit"] = args[i + 1]
-            i += 2
-        elif args[i] == "--min-volume" and i + 1 < len(args):
-            params["min-volume"] = args[i + 1]
+        if args[i] in ("--query", "--category", "--filter", "--limit", "--min-volume") and i + 1 < len(args):
+            params[args[i][2:]] = args[i + 1]
             i += 2
         else:
             i += 1
@@ -130,39 +136,31 @@ def main():
             pass
 
     if "query" in params:
-        # Search endpoint
-        query_params = {"query": params["query"], "includeMarkets": "true"}
-        if "provider" in params:
-            query_params["provider"] = params["provider"]
-        if "limit" in params:
-            query_params["limit"] = params["limit"]
-        else:
-            query_params["limit"] = "10"
-        url = f"{BACKEND_URL}/prediction/events/search?{urllib.parse.urlencode(query_params)}"
+        q = {"query": params["query"], "includeMarkets": "true", "limit": params.get("limit", "10")}
+        url = f"{BASE_URL}/prediction/events/search?{urllib.parse.urlencode(q)}"
     else:
-        # Browse endpoint
-        query_params = {"includeMarkets": "true"}
+        q = {"includeMarkets": "true"}
         if "category" in params:
-            query_params["category"] = params["category"]
+            q["category"] = params["category"]
         if "filter" in params:
-            query_params["filter"] = params["filter"]
-        if "provider" in params:
-            query_params["provider"] = params["provider"]
-        url = f"{BACKEND_URL}/prediction/events?{urllib.parse.urlencode(query_params)}"
+            q["filter"] = params["filter"]
+        url = f"{BASE_URL}/prediction/events?{urllib.parse.urlencode(q)}"
 
     data = _get(url)
-
     if isinstance(data, dict) and data.get("error"):
         print(json.dumps(data))
         sys.exit(1)
 
-    events_raw = data.get("data", []) if isinstance(data, dict) else []
-    events = [_format_event(e, min_volume) for e in events_raw]
+    events_raw = data.get("data", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+    events = [format_event(e, min_volume) for e in events_raw]
     # Drop events left with no investable markets (unless the floor is disabled).
     if min_volume > 0:
         events = [ev for ev in events if ev["markets"]]
-
-    print(json.dumps({"events": events, "total": len(events), "minVolumeUsd": min_volume}))
+    print(json.dumps({
+        "events": events,
+        "total": len(events),
+        "minVolumeUsd": min_volume,
+    }, indent=2))
 
 
 if __name__ == "__main__":

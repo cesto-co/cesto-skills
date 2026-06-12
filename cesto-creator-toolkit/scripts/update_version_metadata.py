@@ -4,9 +4,17 @@ Patch metadata on a specific ProductVersion via
 PUT /creator/products/versions/:versionId.
 
 Use this after creating a basket (Flow A) or after rebalancing (Flow C) to set
-fields the create-version DTO doesn't accept: `label`, `riskLevel`,
-`estimatedApy`, `isStable`, `tradingSchedule`. Also lets you update
-`changelog`, `minimumInvestment`, or flip `isDeprecated` on an older version.
+fields the create-version DTO doesn't accept: `tradingSchedule`. Also lets you
+update `changelog`, `minimumInvestment`, or flip `isDeprecated` on any version.
+
+IMPORTANT — supported fields only:
+  The backend's updateProductVersion handler ONLY persists four fields:
+    changelog, minimumInvestment, tradingSchedule, isDeprecated
+  The DTO technically accepts `label`, `riskLevel`, `estimatedApy`, `isStable`
+  but the service layer silently ignores them — they are never written to the
+  database. This script strips those four unsupported fields client-side and
+  warns the caller so they get honest feedback. Risk level, version label,
+  estimated APY, and stable-flag are set by the Cesto team during review.
 
 The workflow definition is immutable per version — this endpoint never
 changes it. To change allocations, use rebalance_basket.py (creates a new
@@ -20,21 +28,21 @@ Ownership rule (skill-enforced):
   caller's /users/me.id, and confirms the version belongs to that product.
 
 Usage:
-  echo '{"label": "v1.0.0", "riskLevel": "MEDIUM", "estimatedApy": null}' \
+  echo '{"changelog": "...", "minimumInvestment": "10000000"}' \
     | python3 update_version_metadata.py --product-id <productId> --version-id <productVersionId>
 
-Accepted fields (all optional — only send what's changing):
-  label            string (≤50 chars)
-  changelog        string (≤1000 chars)
-  estimatedApy     number | null
-  riskLevel        "LOW" | "MEDIUM" | "HIGH"
+Supported fields (all optional — only send what's changing):
+  changelog         string (≤1000 chars)
   minimumInvestment string (base units)
-  tradingSchedule  any | null
-  isStable         boolean
-  isDeprecated     boolean
+  tradingSchedule   any | null
+  isDeprecated      boolean
+
+Unsupported fields (stripped with a warning — NOT persisted by the backend):
+  label, riskLevel, estimatedApy, isStable
 
 Output:
-  The updated ProductVersion object.
+  The updated ProductVersion object, plus an optional "warning" key if
+  unsupported fields were present and stripped.
 """
 
 import sys
@@ -44,6 +52,7 @@ import urllib.error
 import urllib.request
 
 from _store import read_session, ACCESS_KEY
+from _common import resolve_product_uuid
 
 BASE_URL = "https://backend.cesto.co"
 
@@ -95,7 +104,7 @@ def main():
 
     # Read payload from stdin
     try:
-        payload = json.loads(sys.stdin.read())
+        payload = json.loads(sys.stdin.read(), strict=False)
     except json.JSONDecodeError as e:
         print(json.dumps({"error": True, "message": f"Invalid JSON input: {e}"}))
         sys.exit(1)
@@ -104,12 +113,49 @@ def main():
         print(json.dumps({"error": True, "message": "Payload must be a non-empty JSON object."}))
         sys.exit(1)
 
+    # Strip unsupported fields that the backend DTO accepts but silently ignores.
+    # Patching them returns 200 but the values are never written to the database.
+    UNSUPPORTED = ("riskLevel", "label", "estimatedApy", "isStable")
+    stripped = [f for f in UNSUPPORTED if f in payload]
+    for f in stripped:
+        del payload[f]
+
+    warning = None
+    if stripped:
+        warning = (
+            "These fields are not settable via the skill and were ignored: "
+            + ", ".join(stripped)
+            + ". Risk level, version label, estimated APY, and stable-flag are "
+            "managed by the Cesto team during review — they can't be set through this skill."
+        )
+
+    if not payload:
+        out = {
+            "error": True,
+            "message": (
+                "Nothing left to patch after removing unsupported fields. "
+                "Only changelog, minimumInvestment, tradingSchedule, and isDeprecated "
+                "are supported by this endpoint."
+            ),
+        }
+        if warning:
+            out["warning"] = warning
+        print(json.dumps(out))
+        sys.exit(1)
+
     # Session + role
     session = read_session()
     if session is None:
         print(json.dumps({"error": True, "message": "No valid session found. Please log in first."}))
         sys.exit(1)
     token = session[ACCESS_KEY]
+
+    # Accept a slug or a UUID for --product-id.
+    product_id, rerr = resolve_product_uuid(BASE_URL, product_id, token)
+    if rerr or not product_id:
+        msg = (rerr or {}).get("message", "Could not resolve that basket id or slug.")
+        print(json.dumps({"error": True, "message": msg}))
+        sys.exit(1)
 
     me, err = _http("GET", "/users/me", token, timeout=15)
     if err:
@@ -157,8 +203,17 @@ def main():
     if err:
         print(json.dumps({"error": True, **err}))
         sys.exit(1)
+    if warning and isinstance(result, dict):
+        result["warning"] = warning
     print(json.dumps(result))
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except SystemExit:
+        raise
+    except Exception as _e:
+        import json, sys
+        print(json.dumps({"error": True, "message": f"Unexpected error: {_e}"}))
+        sys.exit(1)

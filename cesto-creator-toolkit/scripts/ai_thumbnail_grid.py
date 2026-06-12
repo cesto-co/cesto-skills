@@ -59,7 +59,7 @@ def main():
         stdin_text = sys.stdin.read().strip()
         if stdin_text:
             try:
-                stdin_payload = json.loads(stdin_text)
+                stdin_payload = json.loads(stdin_text, strict=False)
                 for k, v in stdin_payload.items():
                     payload.setdefault(k, v)
             except json.JSONDecodeError as e:
@@ -108,4 +108,11 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except SystemExit:
+        raise
+    except Exception as _e:
+        import json, sys
+        print(json.dumps({"error": True, "message": f"Unexpected error: {_e}"}))
+        sys.exit(1)
