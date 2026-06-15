@@ -12,6 +12,17 @@ Most endpoints are public GET requests returning JSON with no authentication req
 - [4. Historical Graph](#4-historical-graph) — `GET /products/{id}/graph`
 - [5. Analytics Summary](#5-analytics-summary) — `GET /products/analytics`
 - [6. Simulate Portfolio Graph](#6-simulate-portfolio-graph) — `POST /agent/simulate-graph`
+- [7. List Community (Labs) Posts](#7-list-community-labs-posts) — `GET /labs/posts`
+- [8. My Labs Posts](#8-my-labs-posts) — `GET /labs/posts/me`
+- [9. Single Labs Post](#9-single-labs-post) — `GET /labs/posts/{slug}`
+- [10. Labs Post Backtest](#10-labs-post-backtest) — `GET /labs/posts/{slug}/backtest`
+- [11. Vote on a Labs Post](#11-vote-on-a-labs-post) — `POST /labs/posts/{slug}/vote`
+- [12. Create a Labs Post](#12-create-a-labs-post) — `POST /labs/posts`
+- [13. Update a Labs Post](#13-update-a-labs-post) — `PUT /labs/posts/{slug}`
+- [14. Delete a Labs Post](#14-delete-a-labs-post) — `DELETE /labs/posts/{slug}`
+- [15. Labs Leaderboard](#15-labs-leaderboard) — `GET /labs/leaderboard`
+- [16. Prediction Events (Browse/Search)](#16-prediction-events-browsesearch) — `GET /prediction/events`, `GET /prediction/events/search`
+- [17. Prediction Event / Market Detail](#17-prediction-event--market-detail) — `GET /prediction/events/{eventId}`, `GET /prediction/markets/{marketId}`
 
 ---
 
@@ -587,3 +598,258 @@ Simulates historical performance of a custom token allocation and compares it ag
 |--------|------|
 | 400 | Missing/invalid fields (empty allocations, missing name, etc.) |
 | 403 | No valid session or API key provided |
+
+---
+
+## Labs (Community Baskets)
+
+Cesto **Labs posts** are the baskets that community users create and share — distinct from official "products". Each post links at `https://app.cesto.co/labs/<slug>` and can mix **token legs** and **prediction-market legs**.
+
+**Response envelope note:** Labs list/detail/vote/create/update endpoints wrap their payload in a `data` field. List endpoints also include a `pagination` object: `{ "pagination": { "nextCursor": "<uuid|null>" } }`. The **backtest** endpoint is the exception — it returns the backtest object at the top level (or `null`).
+
+### 7. List Community (Labs) Posts
+
+**`GET /labs/posts?sort=new|trending|pnl&limit=N&cursor=X`**
+
+Public. Auth optional — when a bearer token is sent, each post gains a `userVote` field. `limit` is clamped 1–50 (default behaviour). `sort` defaults to `new`.
+
+#### Response Structure
+
+`{ "data": Array<LabsPost>, "pagination": { "nextCursor": string | null } }`
+
+**`LabsPost` (list item):**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `string` (UUID) | Post id |
+| `slug` | `string` | URL slug — link at `https://app.cesto.co/labs/<slug>` |
+| `title` | `string` | Post title |
+| `description` | `string` | Strategy / thesis |
+| `thumbnailUrl` | `string \| null` | Thumbnail image |
+| `authorId` | `string` (UUID) | Author id |
+| `authorAddress` | `string` | Author wallet address |
+| `authorUsername` | `string \| null` | Author username (may be a wallet address) |
+| `authorAvatarUrl` | `string \| null` | Author avatar |
+| `voteCount` | `integer` | Net vote count |
+| `userVote` | `1 \| -1 \| null` | Caller's vote (only when authenticated) |
+| `pnlScore` | `number \| null` | Ranking PnL score (mirrors `pnl1y`) |
+| `pnl7d` / `pnl30d` / `pnl1y` | `number \| null` | Period PnL percentages |
+| `pnlComputedAt` | `string` (ISO 8601) | When PnL was last computed |
+| `createdAt` | `string` (ISO 8601) | Creation time |
+| `allocations` | `Array<Allocation>` | Token + prediction legs (see [Allocation object](#allocation-object)) |
+
+### 8. My Labs Posts
+
+**`GET /labs/posts/me?limit=N&cursor=X`** — **Auth required.**
+
+Same response shape as [section 7](#7-list-community-labs-posts), but scoped to the caller's own posts. Without a valid session returns `401 { "code": "UNAUTHORIZED", "message": "Unauthorized", "correlationId": "..." }`.
+
+### 9. Single Labs Post
+
+**`GET /labs/posts/{slug}`**
+
+Public / optional auth. Returns one post wrapped in `data`, with inline performance fields added.
+
+#### Response Structure
+
+`{ "data": LabsPostDetail }`
+
+`LabsPostDetail` = all [`LabsPost`](#7-list-community-labs-posts) fields **plus**:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `tokenPerformance` | `object \| null` | 1-year token performance (`avgPercentChange`, `return`, `daysAvailable`, `startDate`, `endDate`, ...) |
+| `tokenPerformance7d` | `object \| null` | 7-day performance |
+| `tokenPerformance30d` | `object \| null` | 30-day performance |
+
+#### Allocation object
+
+Each item in `allocations[]` carries fields for both leg kinds; irrelevant fields are `null`. Distinguish by `kind`.
+
+| Field | Type | Applies to | Description |
+|-------|------|-----------|-------------|
+| `kind` | `"token" \| "prediction"` | both | Leg type (defaults to `token`) |
+| `percentage` | `number` | both | 1–100, ≤2 decimals; all legs sum to 100 |
+| `description` | `string \| null` | both | Optional rationale (≤200) |
+| `mint` | `string \| null` | token | Solana mint |
+| `symbol` | `string \| null` | token | Ticker |
+| `name` | `string \| null` | token | Token name |
+| `logoUrl` | `string \| null` | token | Logo |
+| `marketId` | `string \| null` | prediction | Market id |
+| `eventId` | `string \| null` | prediction | Event id |
+| `side` | `"YES" \| "NO" \| null` | prediction | Position side |
+| `provider` | `"polymarket" \| "kalshi" \| null` | prediction | Source |
+| `eventTitle` | `string \| null` | prediction | Event title (≤200) |
+| `marketTitle` | `string \| null` | prediction | Market title (≤200) |
+| `closeTime` | `number \| null` | prediction | Unix seconds |
+| `imageUrl` | `string \| null` | prediction | Market image |
+| `entryPriceCents` | `number \| null` | prediction | Entry price in cents (≥0) |
+
+### 10. Labs Post Backtest
+
+**`GET /labs/posts/{slug}/backtest?refresh=true`**
+
+Public. Runs a 1-year backtest over the post's **token legs only** (prediction legs are excluded). Returns the backtest object at the **top level** (NOT wrapped in `data`), or `null` when the post has no backtestable tokens / no price history. `refresh=true` forces recomputation.
+
+#### Response Structure (non-null)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `postId` | `string` | Post id |
+| `slug` | `string` | Post slug |
+| `timeRange` | `string` | e.g. `"1y"` |
+| `computedAt` | `string` (ISO 8601) | Compute time |
+| `startDate` / `endDate` | `string` (ISO 8601) | Backtest window |
+| `initialValue` | `number` | Starting value (1000) |
+| `finalValue` | `number` | Ending portfolio value |
+| `metrics` | `object` | `totalReturnPct`, `cagr`, `volatility`, `maxDrawdown`, `sharpe` |
+| `series` | `Array<{ t: string, v: number }>` | Downsampled portfolio series |
+| `benchmark` | `Array<{ t: string, v: number }>` | Downsampled S&P 500 series |
+| `warnings` | `string[]` | Notes (e.g. tokens skipped for missing price history) |
+
+When the response is `null` (or has no `metrics`/`series`), treat it as "no token backtest available — prediction-only or insufficient price history". This is NOT an error.
+
+### 11. Vote on a Labs Post
+
+**`POST /labs/posts/{slug}/vote`** — **Auth required.**
+
+Body: `{ "voteType": 1 }` (upvote) or `{ "voteType": -1 }` (downvote). Re-voting toggles (same value clears) or switches (opposite value). Returns the updated vote state (wrapped in `data`).
+
+### 12. Create a Labs Post
+
+**`POST /labs/posts`** — **Auth required.**
+
+Creates a community basket. Body is a `CreatePostDto`.
+
+#### Request Payload (`CreatePostDto`)
+
+| Field | Type | Required | Rules |
+|-------|------|----------|-------|
+| `title` | `string` | Yes | 1–100 chars |
+| `description` | `string` | Yes | 1–1000 chars |
+| `aiGenerateThumbnail` | `boolean` | * | Provide this OR `thumbnailUrl` |
+| `thumbnailUrl` | `string` (url) | * | Provide this OR `aiGenerateThumbnail` |
+| `allocations` | `Array<AllocationDto>` | Yes | ≥1 leg; all `percentage` values sum to exactly 100 |
+
+**`AllocationDto`** — token leg or prediction leg (see the [Allocation object](#allocation-object) table for field semantics):
+
+- **Token leg:** `{ "kind": "token"(optional), "mint", "symbol", "name", "logoUrl"?, "percentage", "description"? }`
+- **Prediction leg:** `{ "kind": "prediction", "marketId", "eventId", "side": "YES"|"NO", "provider": "polymarket"|"kalshi", "eventTitle", "marketTitle", "closeTime"?, "imageUrl"?, "entryPriceCents"?, "percentage" }`
+
+#### Example Payload (mixed legs)
+
+```json
+{
+  "title": "BTC 2026 Conviction",
+  "description": "Tokenized exposure plus a Polymarket leg on BTC hitting a new high.",
+  "aiGenerateThumbnail": true,
+  "allocations": [
+    {
+      "kind": "token",
+      "mint": "So11111111111111111111111111111111111111112",
+      "symbol": "SOL",
+      "name": "Solana",
+      "percentage": 70
+    },
+    {
+      "kind": "prediction",
+      "marketId": "POLY-2467211",
+      "eventId": "POLY-89502",
+      "side": "YES",
+      "provider": "polymarket",
+      "eventTitle": "What price will Bitcoin hit in 2026?",
+      "marketTitle": "↑ 65,000",
+      "closeTime": 1798779600,
+      "percentage": 30
+    }
+  ]
+}
+```
+
+#### Response
+
+`{ "data": LabsPost }` — the created post, including its `slug`. Link at `https://app.cesto.co/labs/<slug>`.
+
+### 13. Update a Labs Post
+
+**`PUT /labs/posts/{slug}`** — **Auth required (author only).**
+
+Partial update. Body may include any subset of the create fields (`title`, `description`, `aiGenerateThumbnail`/`thumbnailUrl`, `allocations`). If `allocations` is included, all percentages must still sum to 100. Returns the updated post (wrapped in `data`).
+
+### 14. Delete a Labs Post
+
+**`DELETE /labs/posts/{slug}`** — **Auth required (author only).**
+
+Soft-deletes the post. Returns a success acknowledgement.
+
+### 15. Labs Leaderboard
+
+**`GET /labs/leaderboard?limit=N&cursor=X`**
+
+Public. Cursor pagination.
+
+#### Response Structure
+
+`{ "data": Array<LeaderboardRow>, "pagination": { "nextCursor": string | null } }`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `rank` | `integer` | Position |
+| `address` | `string` | Creator wallet address |
+| `username` | `string \| null` | Creator username |
+| `avatarUrl` | `string \| null` | Avatar |
+| `votes` | `integer` | Total votes earned |
+
+---
+
+## Prediction Markets (Public Proxy)
+
+Public proxy over Polymarket/Kalshi. Used to pick prediction legs for a Labs basket. **Provider is derived from the id prefix:** `POLY-…` → `polymarket`, `KX…` → `kalshi`.
+
+**Envelope note:** the **list/search** endpoints wrap results in `{ "data": [...], "pagination": {...} }`. The **single event/market detail** endpoints return the object at the **top level** (not wrapped).
+
+### 16. Prediction Events (Browse/Search)
+
+**`GET /prediction/events?category=<cat>&filter=<f>&includeMarkets=true`**
+**`GET /prediction/events/search?query=<q>&limit=10&includeMarkets=true`**
+
+- Categories: `crypto`, `sports`, `politics`, `economics`, `finance`, `esports`, `weather`
+- Filters: `new`, `live`, `trending`
+
+#### Response Structure
+
+`{ "data": Array<Event>, "pagination": {...} }`
+
+**`Event`:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `eventId` | `string` | Event id (e.g. `POLY-89502`) |
+| `category` / `subcategory` | `string` | Classification |
+| `isActive` / `isLive` | `boolean` | Status flags |
+| `tags` | `string[]` | Tags |
+| `metadata` | `object` | `{ title, slug, closeTime, imageUrl, series, ... }` |
+| `volumeUsd` / `volume24hr` | `string \| number` | Volume |
+| `markets` | `Array<Market>` | Present when `includeMarkets=true` |
+
+### 17. Prediction Event / Market Detail
+
+**`GET /prediction/events/{eventId}`** — one event + its markets (top-level object, includes `markets[]`).
+**`GET /prediction/markets/{marketId}`** — one market (top-level object).
+
+**`Market`:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `marketId` | `string` | Market id |
+| `provider` | `string` | `polymarket` / `kalshi` (also derivable from id prefix) |
+| `title` | `string` | Market title (e.g. `"↑ 65,000"`) |
+| `status` | `string` | e.g. `"open"` |
+| `result` | `string \| null` | Resolution, if settled |
+| `closeTime` | `number` | Unix seconds |
+| `pricing` | `object` | `{ buyYesPriceUsd, buyNoPriceUsd, ... }` in **micro-USD** — divide by `1e6` for dollars |
+| `outcomes` | `string[]` | e.g. `["Yes", "No"]` |
+| `outcomePrices` | `array` | Per-outcome prices |
+| `rulesPrimary` | `string` | Resolution rules |
+
+For a prediction leg you need: `marketId`, `eventId`, `side` (`YES`/`NO`), `provider`, `eventTitle` (from the event's `metadata.title`), and `marketTitle` (the market's `title`).

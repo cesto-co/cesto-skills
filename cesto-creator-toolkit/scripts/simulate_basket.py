@@ -53,12 +53,15 @@ BASE_URL = "https://backend.cesto.co"
 def main():
     # Read definition from stdin
     try:
-        input_data = json.loads(sys.stdin.read())
+        input_data = json.loads(sys.stdin.read(), strict=False)
     except json.JSONDecodeError as e:
         print(json.dumps({"error": True, "message": f"Invalid JSON input: {str(e)}"}))
         sys.exit(1)
 
     # Ensure required fields
+    if not isinstance(input_data, dict):
+        print(json.dumps({"error": True, "message": "Payload must be a JSON object with a 'definition' field."}))
+        sys.exit(1)
     if "definition" not in input_data:
         print(json.dumps({"error": True, "message": "Missing 'definition' in input"}))
         sys.exit(1)
@@ -139,4 +142,11 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except SystemExit:
+        raise
+    except Exception as _e:
+        import json, sys
+        print(json.dumps({"error": True, "message": f"Unexpected error: {_e}"}))
+        sys.exit(1)

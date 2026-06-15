@@ -5,8 +5,8 @@ description: >
   platform via its authenticated API. Use this skill whenever a CREATOR-role OR ADMIN-role
   user wants to build a new basket (token swaps, prediction-market positions, or mixed),
   publish a new version with different allocations (rebalance), patch a basket's metadata
-  (name, cover image, description, about, risk notes, resources, riskLevel, label,
-  estimatedApy), simulate performance before publishing, browse the caller's own baskets
+  (name, cover image, description, about, risk notes, resources, changelog, minimumInvestment,
+  tradingSchedule, isDeprecated), simulate performance before publishing, browse the caller's own baskets
   and drafts, upload a cover image, or generate one with AI via Midjourney or Gemini
   (4 options + pick + download). Admins are treated exactly like creators here — they can
   only manage baskets they created themselves through this skill; cross-creator admin
@@ -43,12 +43,7 @@ pre-flight against `/users/me` → `createdBy`; the agent should also start from
 `fetch_my_baskets.py` (which is server-scoped to the caller via `?mine=true`) and
 never let the user paste a slug for a basket they didn't create.
 
-**Publication guardrail.** This skill never publishes a basket. The backend honors
-`isActive` / `isPublished` from admin payloads, so without a client-side strip an
-admin agent could accidentally take a basket live. `create_basket.py` and
-`update_basket.py` strip those fields before sending, regardless of role — every
-basket created or edited through the skill stays a DRAFT. To actually publish,
-use the frontend admin UI.
+**Publication guardrail.** This skill never publishes a basket. On CREATE, the backend forces isActive=false / isPublished=false for every role (including admins), so a new basket is always a DRAFT. On UPDATE, the backend would honor isActive / isPublished from an admin payload, so update_basket.py strips those fields for both roles to keep the skill draft-only. create_basket.py also strips them as belt-and-suspenders. To actually publish, use the frontend admin UI.
 
 ---
 
@@ -146,10 +141,11 @@ Ask the user (or draft from their request — they confirm):
 | About | 20 chars | Full strategy description. |
 | Risk notes | 10 chars | **Format as bullet points with bold headers** — `**No Liquidation Risk** — All positions are binary.` |
 | Resources | 20 chars | Thesis, links, reasoning. **Bullet points with bold headers** — `**Thesis** — ...` |
-| Minimum investment | > 0 USDC | Always ask: *"What's the minimum investment for this basket?"* Convert to base units before submitting (USDC has 6 decimals → 10 USDC = `"10000000"`). |
+| Minimum investment | > 0 USDC | Always ask: *"What's the minimum investment for this basket?"* Convert to base units before submitting (USDC has 6 decimals → 10 USDC = `"10000000"`). Convert with `python3 to_base_units.py 10` → `"10000000"`, `python3 to_base_units.py 12.5` → `"12500000"`. |
 
 Don't ask about base token — it's always USDC. Don't ask about `riskLevel` / `label` /
-`estimatedApy` / `isStable` yet — those come in **Step 9** as a follow-up patch.
+`estimatedApy` / `isStable` — those are managed by the Cesto team during review and
+cannot be set through this skill.
 
 ### Step 3: Token selection (skip if prediction-only)
 
@@ -175,6 +171,12 @@ python3 <skill-path>/scripts/search_predictions.py --category crypto --filter tr
 Categories: `crypto`, `sports`, `politics`, `economics`, `finance`, `esports`, `weather`.
 Filters: `new`, `live`, `trending`.
 
+**Investability floor:** by default only markets with traded volume **above $100,000**
+are returned (illiquid markets are hidden, since a basket shouldn't hold an
+untradeable position). Each event reports `marketsHidden`. If a user explicitly
+wants to see everything, pass `--min-volume 0`. When a user asks "which markets can
+I invest in", trust this filter — only surface what the script returns.
+
 **Specific market:**
 ```bash
 python3 <skill-path>/scripts/get_prediction_detail.py --market POLY-573656 2>/dev/null
@@ -193,6 +195,18 @@ Sum of all percentages (tokens + predictions) must equal exactly **100**. If not
 the current total and iterate with the user until it does. Integer percentages only —
 if rounding leaves you at 99 or 101, add/subtract the remainder from the largest
 allocation.
+
+Before building the full payload you can pipe a draft definition through
+`validate_allocations.py` to catch the error early:
+
+```bash
+echo '{"bucket": {"nodes": [{"amount": {"percentage": 60}}, {"amount": {"percentage": 40}}]}}' \
+  | python3 <skill-path>/scripts/validate_allocations.py 2>/dev/null
+# → {"valid": true, "sum": 100}
+```
+
+`create_basket.py` also runs this check automatically and exits with a JSON error
+before touching the API if the sum isn't 100.
 
 ### Step 6: Build the workflow definition
 
@@ -287,9 +301,11 @@ A cover image is required — either pick an upload path or generate one with AI
 
 When the creator picks "Generate with AI", drive the full sub-flow documented in
 [`references/ai-thumbnail-flow.md`](references/ai-thumbnail-flow.md). The short
-version: pick Midjourney/Gemini → optionally pre-fill a prompt → generate a 2×2
-grid → poll until ready → show the 4 URLs in a numbered table → user picks "use N"
-(commits as cover), "download N" (saves to `~/Downloads`), or "regenerate".
+version: pick Midjourney/Gemini → optionally generate a starter prompt locally
+(no backend endpoint exists for this — `ai_thumbnail_prompt.py` builds it
+client-side) → generate a 2×2 grid → poll until ready → show the 4 URLs in a
+numbered table → user picks "use N" (commits as cover), "download N" (saves to
+`~/Downloads`), or "regenerate".
 
 End state: a `finalUrl` you'll pass as `product.logoUrl` in Step 10. Do **not** set
 `aiGenerateThumbnail` alongside a real `logoUrl` — they're mutually exclusive.
@@ -339,22 +355,29 @@ From the normalized response capture:
 If the response has `error: true` with status 400, surface the validation message
 verbatim — almost always a definition-shape problem (see workflow-definition.md).
 
-### Step 11: Patch version metadata (second half)
+### Step 11: Patch version metadata (second half, optional)
 
-If the user wants any of `riskLevel`, `label`, `estimatedApy`, `isStable` set on this
-first version, do a follow-up PUT. Ask them now (it's quick):
+You may optionally patch a small set of **supported** fields on this first version.
+Ask the user now (it's quick) — or skip entirely, the basket is fully usable without them:
 
-> "Last thing — what risk level for this basket: LOW, MEDIUM, or HIGH? Anything else
-> like an estimated APY you want shown? You can also skip."
+> "Anything else to set on this version? I can update the changelog, minimum investment,
+> trading schedule, or mark it deprecated. (Risk level, estimated APY, version label, and
+> stable-flag are set by the Cesto team during review — they can't be set here.)"
 
-If they answer, build a payload and patch:
+**Note:** `riskLevel`, `label`, `estimatedApy`, and `isStable` are NOT settable via this
+skill. The backend DTO accepts them without error but silently ignores them — they're
+managed by the Cesto team. The script strips and warns if you try to send them.
+
+Supported fields: `changelog`, `minimumInvestment`, `tradingSchedule`, `isDeprecated`.
+
+If they want to patch something supported, build a payload and call:
 
 ```bash
-echo '{"label": "v1.0.0", "riskLevel": "MEDIUM", "estimatedApy": null, "isStable": false}' \
+echo '{"changelog": "Initial release", "minimumInvestment": "10000000"}' \
   | python3 <skill-path>/scripts/update_version_metadata.py --product-id <productId> --version-id <versionId> 2>/dev/null
 ```
 
-If they skip, that's fine — the version is fully usable without these fields.
+If they skip, proceed directly to Step 12.
 
 ### Step 12: Confirm DRAFT status
 
@@ -516,7 +539,17 @@ Ask what's changing — they can add positions, remove positions, change percent
 update the text fields (`about`, `riskNotes`, `resources`, `minimumInvestment`). Confirm
 each change before moving on.
 
-**Allocations must sum to exactly 100.** Iterate until they do.
+**Allocations must sum to exactly 100.** Iterate until they do. Use
+`validate_allocations.py` to check a draft definition before submitting:
+
+```bash
+echo '{"bucket": {"nodes": [{"amount": {"percentage": 60}}, {"amount": {"percentage": 40}}]}}' \
+  | python3 <skill-path>/scripts/validate_allocations.py 2>/dev/null
+# → {"valid": true, "sum": 100}
+```
+
+`rebalance_basket.py` also runs this check automatically and exits with a JSON error
+before touching the API if the sum isn't 100.
 
 ### Step 6: Rebuild the workflow definition
 
@@ -580,8 +613,10 @@ Capture `response.versionId` and `response.productId` for the optional Step 11 p
 
 ### Step 11: Optionally patch version metadata
 
-If the user wants `riskLevel`/`label`/`estimatedApy`/`isStable` set on the new
-version, patch it (same as Flow A Step 11 but with the new `versionId`).
+If the user wants to update `changelog`, `minimumInvestment`, `tradingSchedule`, or
+`isDeprecated` on the new version, patch it (same as Flow A Step 11 but with the
+new `versionId`). Reminder: `riskLevel`, `label`, `estimatedApy`, and `isStable`
+are team-managed and cannot be set through this skill.
 
 ### Step 12: Confirm DRAFT status
 
@@ -614,28 +649,36 @@ Preview: https://app.cesto.co/product/{slug}
 
 ## Flow D — Patch version metadata
 
-For setting `riskLevel`, `label`, `estimatedApy`, `isStable`, `isDeprecated`,
-`tradingSchedule`, or updating `changelog` / `minimumInvestment` on a *specific*
-existing version without changing its definition. Reference: [`api-reference.md` §11](references/api-reference.md#11-put-creatorproductsversionsversionid).
+For updating `changelog`, `minimumInvestment`, `tradingSchedule`, or `isDeprecated`
+on a *specific* existing version without changing its definition. Reference:
+[`api-reference.md` §11](references/api-reference.md#11-put-creatorproductsversionsversionid).
+
+**Supported fields only:** `changelog`, `minimumInvestment`, `tradingSchedule`, `isDeprecated`.
+`riskLevel`, `label`, `estimatedApy`, and `isStable` are NOT patchable via this skill —
+they are managed by the Cesto team during review. The backend DTO accepts them without
+returning an error, but the service layer silently ignores them (they are never persisted).
+The script strips those fields and warns you if you include them.
 
 1. Auth check.
 2. List baskets, pick one, fetch detail. Identify the `versionId` you want to patch —
    `fetch_basket_detail.py` returns the latest version's `versionId`; for older versions
    call `GET /creator/products/:id` via `api_request.py` and pick from `versions[]`.
 3. Ask the user what to change. Common cases:
-   - "Set this version's risk level to HIGH"
-   - "Bump estimated APY to 22.5"
+   - "Update the changelog to describe what changed"
+   - "Set the minimum investment to 20 USDC"
    - "Mark version 2 as deprecated"
+   - "Set a trading schedule on this version"
 4. Build the payload (only the fields being changed) and patch. Pass **both**
    `--product-id` and `--version-id` — the script enforces ownership by
    verifying `createdBy === /users/me.id` on the parent product.
 
    ```bash
-   echo '{"riskLevel": "HIGH", "label": "v3.1.0"}' \
+   echo '{"changelog": "Reduced PSG allocation; added Real Madrid", "minimumInvestment": "15000000"}' \
      | python3 update_version_metadata.py \
          --product-id <productId> --version-id <versionId> 2>/dev/null
    ```
-5. Confirm what changed.
+5. Confirm what changed. If the script output includes a `"warning"` field, surface it
+   to the user so they know which fields were stripped and why.
 
 ---
 
@@ -656,15 +699,17 @@ All bundled scripts output JSON. Suppress stderr with `2>/dev/null`.
 | `fetch_basket_detail.py <slug-or-id>` | Full product + latest version (uses owner endpoint when possible) | optional |
 | `simulate_basket.py` | Simulate a workflow definition | no |
 | `upload_thumbnail.py --file ¦ --url` | Upload cover image (manual) | yes |
-| `ai_thumbnail_prompt.py --provider --title [--description]` | Pre-fill default AI prompt | yes |
+| `ai_thumbnail_prompt.py --provider --title [--description]` | Build a starter AI prompt locally (no backend call — the prompt-template endpoint doesn't exist) | no |
 | `ai_thumbnail_grid.py --provider --title --description --prompt` | Start 2×2 Midjourney/Gemini grid → returns `sessionId` | yes |
 | `ai_thumbnail_session.py --session-id [--wait] [--wait-for grid¦upscale]` | Poll session (5s × 3min ceiling); returns previews + final URL | yes |
 | `ai_thumbnail_select.py --session-id --index` | Select-as-final (poll session for `finalUrl` after) | yes |
 | `ai_thumbnail_download.py --session-id --index [--output PATH]` | Upscale + save image to `~/Downloads` (or `--output`) | yes |
-| `create_basket.py` | POST `/creator/products` (passthrough) | yes |
+| `to_base_units.py <amount> [--decimals=6]` | Convert human USDC amount to base-unit string (e.g. `10` → `"10000000"`); use for `minimumInvestment` | no |
+| `validate_allocations.py` | Reads JSON from stdin; verifies percentages sum to 100; accepts allocation array, bucket model, or wrapper object | no |
+| `create_basket.py` | POST `/creator/products` (passthrough); validates allocations before submit | yes |
 | `update_basket.py --product-id <id>` | PUT `/creator/products/:id` (passthrough) | yes |
-| `rebalance_basket.py --product-id <id>` | POST `/creator/products/:id/versions` with auto-version-bump | yes |
-| `update_version_metadata.py --product-id <pid> --version-id <vid>` | PUT `/creator/products/versions/:id` with ownership pre-flight | yes |
+| `rebalance_basket.py --product-id <id>` | POST `/creator/products/:id/versions` with auto-version-bump, allocation validation, and version-collision retry | yes |
+| `update_version_metadata.py --product-id <pid> --version-id <vid>` | PUT `/creator/products/versions/:id` — patches changelog, minimumInvestment, tradingSchedule, isDeprecated only; strips riskLevel/label/estimatedApy/isStable (unsupported by backend) with a warning | yes |
 
 ---
 

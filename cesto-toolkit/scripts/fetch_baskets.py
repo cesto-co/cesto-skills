@@ -13,7 +13,10 @@ Sort options:
   1y   - Sort by 1-year return
 """
 
-import json, sys, urllib.request
+import json, os, sys, urllib.request
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.path.dirname(__file__))
 
 BASE_URL = "https://backend.cesto.co"
 TIMEOUT = 15
@@ -26,6 +29,24 @@ def fetch(path):
         return json.loads(resp.read().decode())
     except Exception as e:
         print(json.dumps({"error": True, "message": str(e)}), file=sys.stderr)
+        return None
+
+
+def fetch_authed(path):
+    """Fetch a path with bearer-token auth if a valid session exists. Returns None on any failure."""
+    try:
+        from _store import read_session, ACCESS_KEY
+        session = read_session()
+        if not session:
+            return None
+        token = session.get(ACCESS_KEY)
+        if not token:
+            return None
+        req = urllib.request.Request(f"{BASE_URL}{path}")
+        req.add_header("Authorization", f"Bearer {token}")
+        resp = urllib.request.urlopen(req, timeout=TIMEOUT)
+        return json.loads(resp.read().decode())
+    except Exception:
         return None
 
 
@@ -49,12 +70,25 @@ def parse_sort_flag():
 def main():
     sort_by = parse_sort_flag()
 
-    products = fetch("/products")
+    all_products = fetch("/products")
     analytics = fetch("/products/analytics")
 
-    if products is None:
+    if all_products is None:
         print(json.dumps({"error": True, "message": "Failed to fetch baskets"}))
         sys.exit(1)
+
+    # Only show published+active baskets from the public list
+    products = [p for p in all_products if p.get("isPublished") and p.get("isActive")]
+
+    # Best-effort: include the caller's own drafts (tagged with isDraft=True)
+    # This call is optional — browsing still works with no session.
+    own_products = fetch_authed("/products?mine=true")
+    if own_products and isinstance(own_products, list):
+        published_ids = {p["id"] for p in products}
+        for op in own_products:
+            if op.get("id") not in published_ids:
+                op["_isDraft"] = True
+                products.append(op)
 
     # Analytics is a dict keyed by basket ID
     analytics_map = analytics if isinstance(analytics, dict) else {}
@@ -77,11 +111,11 @@ def main():
             "change24h": safe_num(a.get("priceChange24h")),
             "return7d": safe_num(tp7.get("return", tp7.get("avgPercentChange"))),
             "return30d": safe_num(tp30.get("return", tp30.get("avgPercentChange"))),
-            "return1y": safe_num(tp.get("avgPercentChange")),
+            "return1y": safe_num(tp.get("netPnL", tp.get("annualizedReturn", tp.get("avgPercentChange")))),
             "annualizedReturn": safe_num(tp.get("annualizedReturn")),
         }
 
-        results.append({
+        row = {
             "id": pid,
             "slug": p.get("slug", ""),
             "name": p.get("name", ""),
@@ -90,7 +124,10 @@ def main():
             "activePositions": lv.get("activePositionCount", 0),
             "minInvestmentUSDC": min_inv_usdc,
             "performance": perf,
-        })
+        }
+        if p.get("_isDraft"):
+            row["isDraft"] = True
+        results.append(row)
 
     # Sort by the chosen metric (nulls go last)
     sort_key_map = {
@@ -106,4 +143,11 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except SystemExit:
+        raise
+    except Exception as _e:
+        import json, sys
+        print(json.dumps({"error": True, "message": f"Unexpected error: {_e}"}))
+        sys.exit(1)

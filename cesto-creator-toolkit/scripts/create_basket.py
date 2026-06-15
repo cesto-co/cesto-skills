@@ -3,8 +3,8 @@
 Create a product basket via POST /creator/products.
 
 Passthrough: reads the full JSON payload from stdin and POSTs it as-is.
-The server forces isActive=false and isPublished=false for creator-role
-callers, so the new basket is always saved as a DRAFT pending admin publish.
+The server forces isActive=false and isPublished=false for all roles
+(including admins), so the new basket is always saved as a DRAFT pending admin publish.
 
 Required server-side: either `product.logoUrl` (valid URL) or
 `product.aiGenerateThumbnail: true`. The `version` block must include
@@ -130,12 +130,57 @@ def _check_creator(token):
         return None
 
 
+def _extract_percentages_from_definition(definition):
+    """Walk a bucket-model definition and return a list of percentage values."""
+    if not isinstance(definition, dict):
+        return []
+    bucket = definition.get("bucket")
+    if not isinstance(bucket, dict):
+        return []
+    nodes = bucket.get("nodes") or []
+    percentages = []
+    for node in nodes:
+        if isinstance(node, dict):
+            amount = node.get("amount")
+            if isinstance(amount, dict) and "percentage" in amount:
+                percentages.append(amount["percentage"])
+    return percentages
+
+
+def _validate_allocations(payload):
+    """
+    Inspect payload for workflow.definition and verify that node percentages
+    sum to exactly 100. Returns None if valid, or a human-readable error string.
+    """
+    workflow = payload.get("workflow") if isinstance(payload.get("workflow"), dict) else None
+    if workflow is None:
+        return None  # No workflow block — nothing to validate here.
+    definition = workflow.get("definition")
+    if definition is None:
+        return None  # No definition — skip (the API will reject it anyway).
+    percentages = _extract_percentages_from_definition(definition)
+    if not percentages:
+        return None  # Can't parse percentages — let the API validate.
+    total = sum(percentages)
+    if total != 100:
+        return (
+            f"Allocations sum to {total}, must equal 100. "
+            f"Adjust the node percentages before submitting. "
+            f"(Found {len(percentages)} node(s): {percentages})"
+        )
+    return None
+
+
 def main():
     # Read payload from stdin
     try:
-        payload = json.loads(sys.stdin.read())
+        payload = json.loads(sys.stdin.read(), strict=False)
     except json.JSONDecodeError as e:
         print(json.dumps({"error": True, "message": f"Invalid JSON input: {str(e)}"}))
+        sys.exit(1)
+
+    if not isinstance(payload, dict):
+        print(json.dumps({"error": True, "message": "Payload must be a JSON object with product, workflow, and version."}))
         sys.exit(1)
 
     # Get session
@@ -161,14 +206,23 @@ def main():
     if product is not None and not product.get("slug"):
         product["slug"] = _to_slug(product.get("name", "")) or "basket"
 
-    # Publication guardrail. The backend honors isActive/isPublished from admin
-    # payloads, which would let an admin agent (or a typo) take a basket live
-    # via the skill. This skill never publishes — strip those fields client-side
-    # for BOTH roles so a basket created here is always a DRAFT. Publication
-    # is a frontend-only action.
+    # Publication guardrail (belt-and-suspenders). On create, the backend already
+    # forces isActive=false and isPublished=false for EVERY role, so a created
+    # basket is always a DRAFT regardless of payload or role. We still strip these
+    # fields client-side for clarity and to stay consistent with update_basket.py
+    # (where the strip genuinely matters — on UPDATE the backend honors
+    # isActive/isPublished from an ADMIN payload). This skill never publishes;
+    # publication is a frontend admin-UI action.
     if isinstance(payload.get("product"), dict):
         payload["product"].pop("isActive", None)
         payload["product"].pop("isPublished", None)
+
+    # Fail fast: validate allocations sum to exactly 100 before hitting the API.
+    # The backend does not enforce this — a malformed basket persists silently.
+    _alloc_err = _validate_allocations(payload)
+    if _alloc_err is not None:
+        print(json.dumps({"error": True, "message": _alloc_err}))
+        sys.exit(1)
 
     url = f"{BASE_URL}{ENDPOINT}"
 
@@ -209,4 +263,11 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except SystemExit:
+        raise
+    except Exception as _e:
+        import json, sys
+        print(json.dumps({"error": True, "message": f"Unexpected error: {_e}"}))
+        sys.exit(1)
