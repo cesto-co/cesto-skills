@@ -55,6 +55,7 @@ never let the user paste a slug for a basket they didn't create.
 | You're calling an endpoint and want to confirm the request DTO, the response shape, or what an error means. | [`references/api-reference.md`](references/api-reference.md) — every endpoint this skill uses, with full DTOs and example payloads. |
 | The creator picks "Generate with AI" as their cover image. | [`references/ai-thumbnail-flow.md`](references/ai-thumbnail-flow.md) — Midjourney/Gemini sub-flow: prompt → grid → 4 previews → use one, download one, or regenerate. |
 | The user wants to design a basket from a theme rather than a token list. | [`references/research-flow.md`](references/research-flow.md) — ecosystem mapping, token/market discovery, narrative synthesis. |
+| You're writing or rewriting a basket's `about`, `riskNotes`, or `resources` (create, edit, rebalance, or completing a draft's strategy details). | [`references/strategy-fields.md`](references/strategy-fields.md) — house format + voice, per-type section skeletons, the web-research rules, and how the three fields map onto the version block. |
 
 Don't try to reconstruct the bucket-model schema from memory — the parser is strict and
 small mistakes (`submitMethod: "jito"`, Liquid templates, missing `bucket` key) cause
@@ -102,6 +103,7 @@ URL allowlist is `https://backend.cesto.co`.
 | "Create a basket / build a product / new basket with SOL and BTC / polymarket basket / mixed basket" | [Flow A — Create](#flow-a--create-a-new-basket) |
 | "Help me design / research / what's trending / pick tokens for me" | [Flow A](#flow-a--create-a-new-basket) starting from [`references/research-flow.md`](references/research-flow.md) |
 | "Edit my basket / update description / change cover / rename" | [Flow B — Edit metadata](#flow-b--edit-metadata) |
+| "Complete / generate / write the about, risk, and resources for my draft basket {id}" | [Flow B — Edit metadata](#flow-b--edit-metadata), writing fields per [`references/strategy-fields.md`](references/strategy-fields.md) |
 | "Rebalance / change allocations / new version / publish v3" | [Flow C — Rebalance (new version)](#flow-c--rebalance-new-version) |
 | "Patch risk level / set label / mark deprecated / set estimated APY" | [Flow D — Patch version metadata](#flow-d--patch-version-metadata) |
 | "My baskets / show my products / what drafts do I have" | Run `fetch_my_baskets.py`; render the table |
@@ -146,6 +148,12 @@ Ask the user (or draft from their request — they confirm):
 Don't ask about base token — it's always USDC. Don't ask about `riskLevel` / `label` /
 `estimatedApy` / `isStable` — those are managed by the Cesto team during review and
 cannot be set through this skill.
+
+When you draft `about`, `riskNotes`, or `resources` (rather than the user supplying final
+copy), write them to Cesto's house format and voice — open
+[`references/strategy-fields.md`](references/strategy-fields.md) for the per-type section
+skeletons, the bolded-allocation-line rule, and the web-research requirements. Fold the
+result into the payload's `version` block in Step 10.
 
 ### Step 3: Token selection (skip if prediction-only)
 
@@ -424,7 +432,11 @@ Flow C.
    - Product fields (`name`, `description`, `category`, `tags`, `logoUrl`,
      `aiGenerateThumbnail`, `pointsMultiplier`, `metadata`) go in the `product` block.
    - Content fields (`about`, `riskNotes`, `resources`, `minimumInvestment`) go in the
-     `version` block — they live on ProductVersion, not the product.
+     `version` block — they live on ProductVersion, not the product. **Generating any of
+     `about` / `riskNotes` / `resources` yourself** (e.g. a draft was created with them blank
+     and you're asked to complete the strategy details)? Write them to house format via
+     [`references/strategy-fields.md`](references/strategy-fields.md) — research the
+     constituents first, don't write from memory.
    - Definition changes go in `workflow.definition` — but that's a rebalance; redirect
      to Flow C instead.
    - **Changing the cover image?** Run [Flow A Step 9](#step-9-cover-image), pick file,
@@ -537,7 +549,8 @@ What would you like to change?
 
 Ask what's changing — they can add positions, remove positions, change percentages, or
 update the text fields (`about`, `riskNotes`, `resources`, `minimumInvestment`). Confirm
-each change before moving on.
+each change before moving on. If you're (re)writing `about` / `riskNotes` / `resources`
+yourself, follow [`references/strategy-fields.md`](references/strategy-fields.md).
 
 **Allocations must sum to exactly 100.** Iterate until they do. Use
 `validate_allocations.py` to check a draft definition before submitting:
