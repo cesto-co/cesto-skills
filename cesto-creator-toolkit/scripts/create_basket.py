@@ -214,7 +214,7 @@ def main():
     # isActive/isPublished from an ADMIN payload). This skill never publishes;
     # publication is a frontend admin-UI action.
     if isinstance(payload.get("product"), dict):
-        payload["product"].pop("isActive", None)
+        payload["product"].pop("isActive", True)
         payload["product"].pop("isPublished", None)
 
     # Fail fast: validate allocations sum to exactly 100 before hitting the API.
