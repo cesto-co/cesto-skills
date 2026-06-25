@@ -6,10 +6,11 @@ Reads a partial JSON payload from stdin and PUTs it. Only send fields you
 want to change. To change allocations (the workflow definition), use
 rebalance_basket.py instead — it creates a new version.
 
-The server silently strips `product.isActive` and `product.isPublished` for
-creator-role callers; admins can flip them server-side, but this skill
-enforces the same DRAFT-only behavior for admins (see ownership check
-below). Cover image, content fields, etc. all work the same for both roles.
+This skill keeps `product.isActive` true always and `product.isPublished` false
+always. PUT /creator/products/:id honors both fields, so this script forces
+`isActive=true` into the payload and strips `isPublished` — every edit leaves the
+basket ACTIVE but not published. Cover image, content fields, etc. work the same
+for both roles.
 
 Where each field belongs:
   product.*   — name, description, category, tags, logoUrl, aiGenerateThumbnail,
@@ -141,13 +142,15 @@ def main():
         }))
         sys.exit(1)
 
-    # Publication guardrail. PUT /creator/products/:id honors isActive and
-    # isPublished from admin payloads — confirmed in live testing. Strip them
-    # client-side for BOTH roles so this skill never publishes a basket.
-    # Publication is a frontend-only action.
-    if isinstance(payload.get("product"), dict):
-        payload["product"].pop("isActive", None)
-        payload["product"].pop("isPublished", None)
+    # Keep isActive true always and isPublished false always. Force isActive=true
+    # into the product block so an edit never deactivates the basket, and strip
+    # isPublished so this skill never "publishes". (PUT honors both fields.)
+    product_block = payload.get("product")
+    if not isinstance(product_block, dict):
+        product_block = {}
+        payload["product"] = product_block
+    product_block["isActive"] = True
+    product_block.pop("isPublished", None)
 
     # PUT
     result, err = _http("PUT", f"{ENDPOINT}/{product_id}", token, body=payload)

@@ -25,11 +25,16 @@ description: >
 
 # Cesto Creator Toolkit
 
-Help creators design, publish, and revise product baskets on [Cesto](https://app.cesto.co)
-through the backend API at `https://backend.cesto.co`.
+Help creators design and revise product baskets on [Cesto](https://app.cesto.co)
+through the backend API at `https://backend.cesto.co`. Baskets are always **active**
+(`isActive=true`) but **never published** (`isPublished` stays false) through this skill.
 
-Baskets can hold token swaps, Polymarket/Kalshi prediction positions, or both. The base
-input token is always USDC.
+Baskets hold token swaps (USDC → token allocations). The base input token is always USDC.
+
+> **Prediction markets are coming soon.** Polymarket/Kalshi prediction positions are not
+> available through this skill yet. If a user asks for a prediction-market, polymarket,
+> kalshi, or "mixed" basket, tell them prediction markets are **coming soon** and offer to
+> build a token-only basket instead. Do not add `prediction.*` nodes to any definition.
 
 This skill is for **CREATOR or ADMIN** role users. If the caller has any other role,
 stop immediately and tell them what role they have.
@@ -43,7 +48,7 @@ pre-flight against `/users/me` → `createdBy`; the agent should also start from
 `fetch_my_baskets.py` (which is server-scoped to the caller via `?mine=true`) and
 never let the user paste a slug for a basket they didn't create.
 
-**Publication guardrail.** This skill never publishes a basket. On CREATE, the backend forces isActive=false / isPublished=false for every role (including admins), so a new basket is always a DRAFT. On UPDATE, the backend would honor isActive / isPublished from an admin payload, so update_basket.py strips those fields for both roles to keep the skill draft-only. create_basket.py also strips them as belt-and-suspenders. To actually publish, use the frontend admin UI.
+**Active-but-unpublished guardrail.** Through this skill, every basket is kept **active** (`isActive=true`) and **never published** (`isPublished` stays false). On CREATE, the backend forces `isActive=false`/`isPublished=false`, so `create_basket.py` follows the create with a PUT that sets `isActive=true` (it never sends `isPublished`). On UPDATE, `update_basket.py` forces `isActive=true` into the payload and strips `isPublished`, so an edit can never deactivate the basket and can never publish it. Publishing (flipping `isPublished` true) is out of scope — it's a separate action outside this skill.
 
 ---
 
@@ -73,7 +78,6 @@ python3 <skill-path>/scripts/session_status.py 2>/dev/null
 
 Interpret the result:
 - `status: "valid"` or `"refreshed"` **and** `role` in `{"CREATOR", "ADMIN"}` → proceed.
-  Remember the role — you'll use it to pick the right DRAFT message later.
 - `status: "unauthorized"` → tell the user "You need CREATOR or ADMIN role to use this
   skill. Your current role is `{role}`." and stop.
 - `status: "expired"` → run `start_login.py` to start a fresh magic-link login, then
@@ -100,7 +104,8 @@ URL allowlist is `https://backend.cesto.co`.
 
 | What the user is trying to do | Flow |
 |---|---|
-| "Create a basket / build a product / new basket with SOL and BTC / polymarket basket / mixed basket" | [Flow A — Create](#flow-a--create-a-new-basket) |
+| "Create a basket / build a product / new basket with SOL and BTC" | [Flow A — Create](#flow-a--create-a-new-basket) |
+| "Polymarket / prediction / mixed basket" | Tell the user prediction markets are **coming soon**; offer a token-only basket via [Flow A — Create](#flow-a--create-a-new-basket) |
 | "Help me design / research / what's trending / pick tokens for me" | [Flow A](#flow-a--create-a-new-basket) starting from [`references/research-flow.md`](references/research-flow.md) |
 | "Edit my basket / update description / change cover / rename" | [Flow B — Edit metadata](#flow-b--edit-metadata) |
 | "Complete / generate / write the about, risk, and resources for my draft basket {id}" | [Flow B — Edit metadata](#flow-b--edit-metadata), writing fields per [`references/strategy-fields.md`](references/strategy-fields.md) |
@@ -108,7 +113,7 @@ URL allowlist is `https://backend.cesto.co`.
 | "Patch risk level / set label / mark deprecated / set estimated APY" | [Flow D — Patch version metadata](#flow-d--patch-version-metadata) |
 | "My baskets / show my products / what drafts do I have" | Run `fetch_my_baskets.py`; render the table |
 | "Show me {slug} / details on my basket" | Run `fetch_basket_detail.py {slug}` |
-| "What prediction markets are available / browse markets" | Run `search_predictions.py`; render the table |
+| "What prediction markets are available / browse markets" | Prediction markets are **coming soon** — tell the user they aren't available through this skill yet |
 | "Simulate my basket / backtest this allocation" | Pipe `{definition, amount, refresh}` into `simulate_basket.py` |
 
 ---
@@ -117,15 +122,14 @@ URL allowlist is `https://backend.cesto.co`.
 
 ### Step 0: Decide the entry path
 
-- If the user already named specific tokens / markets / allocations → skip to Step 1.
+- If the user already named specific tokens / allocations → skip to Step 1.
 - If they have a theme but want help filling in the basket → follow
   [`references/research-flow.md`](references/research-flow.md) for ecosystem mapping and
-  market research, then come back here at Step 3. Default to **mixed** baskets (tokens +
-  predictions) unless the user explicitly asks for one or the other.
+  token discovery, then come back here at Step 3. Baskets are **token-only** — prediction
+  markets are coming soon, so don't propose prediction positions.
 - Otherwise, ask once:
-  > "Want me to research the ecosystem around your idea — sponsors, media, tech
-  > partners — and pick tokens and prediction markets that connect to it? Or do you
-  > already have a list in mind?"
+  > "Want me to research the ecosystem around your idea and pick tokens that connect to
+  > it? Or do you already have a list in mind?"
 
 ### Step 1: Auth + role check
 
@@ -155,7 +159,7 @@ copy), write them to Cesto's house format and voice — open
 skeletons, the bolded-allocation-line rule, and the web-research requirements. Fold the
 result into the payload's `version` block in Step 10.
 
-### Step 3: Token selection (skip if prediction-only)
+### Step 3: Token selection
 
 ```bash
 python3 <skill-path>/scripts/fetch_tokens.py 2>/dev/null
@@ -165,44 +169,18 @@ Present available tokens in a table (symbol, name, price, 24h change). User pick
 and percentages. For each chosen token capture: `mint`, `symbol`, `name`, `logoUrl`,
 `percentage`.
 
-### Step 4: Prediction-market selection (skip if token-only)
+### Step 4: Prediction markets — coming soon
 
-The user provides either a keyword or a specific market ID.
-
-**Keyword search:**
-```bash
-python3 <skill-path>/scripts/search_predictions.py --query "bitcoin" 2>/dev/null
-# or browse a category:
-python3 <skill-path>/scripts/search_predictions.py --category crypto --filter trending 2>/dev/null
-```
-
-Categories: `crypto`, `sports`, `politics`, `economics`, `finance`, `esports`, `weather`.
-Filters: `new`, `live`, `trending`.
-
-**Investability floor:** by default only markets with traded volume **above $100,000**
-are returned (illiquid markets are hidden, since a basket shouldn't hold an
-untradeable position). Each event reports `marketsHidden`. If a user explicitly
-wants to see everything, pass `--min-volume 0`. When a user asks "which markets can
-I invest in", trust this filter — only surface what the script returns.
-
-**Specific market:**
-```bash
-python3 <skill-path>/scripts/get_prediction_detail.py --market POLY-573656 2>/dev/null
-python3 <skill-path>/scripts/get_prediction_detail.py --event   POLY-36173  2>/dev/null
-```
-
-Render matching events/markets in a table (Event, Market, YES Price, Volume, Closes).
-User picks event → market → side (`YES`/`NO`) → percentage. Capture per position:
-`marketTicker`, `eventTicker`, `seriesTicker`, `title`, `side`, `closeTime`,
-`percentage`, and the `protocol` (Polymarket markets start `POLY-`; Kalshi markets start
-`KX…`).
+Prediction-market positions are **not available through this skill yet**. If the user
+asks to add a Polymarket/Kalshi market, a prediction, or a "mixed" basket, tell them
+prediction markets are **coming soon** and keep the basket token-only. Do not run the
+prediction search scripts and do not add `prediction.*` nodes to the definition.
 
 ### Step 5: Validate allocations
 
-Sum of all percentages (tokens + predictions) must equal exactly **100**. If not, show
-the current total and iterate with the user until it does. Integer percentages only —
-if rounding leaves you at 99 or 101, add/subtract the remainder from the largest
-allocation.
+Sum of all token percentages must equal exactly **100**. If not, show the current total
+and iterate with the user until it does. Integer percentages only — if rounding leaves
+you at 99 or 101, add/subtract the remainder from the largest allocation.
 
 Before building the full payload you can pipe a draft definition through
 `validate_allocations.py` to catch the error early:
@@ -219,8 +197,8 @@ before touching the API if the sum isn't 100.
 ### Step 6: Build the workflow definition
 
 Open [`references/workflow-definition.md`](references/workflow-definition.md) and build a
-bucket-model definition. Template 2 ("mixed open basket") is the right starting point
-for most baskets. The short version:
+bucket-model definition. Template 1 ("token-only open basket") is the right starting point.
+The short version:
 
 ```jsonc
 {
@@ -228,8 +206,6 @@ for most baskets. The short version:
     "mode": "parallel",
     "nodes": [
       /* one swap.token node per token allocation, submitMethod "jupiter",
-         amount: { percentage: N } */
-      /* one prediction.open node per prediction allocation, submitMethod "rpc",
          amount: { percentage: N } */
     ]
   }
@@ -245,9 +221,8 @@ Walk the nodes you built in Step 6 and pick a category:
 
 | If the bucket contains | `category` |
 |---|---|
-| Any `prediction.*` node | `"prediction"` |
-| Any `lending.*` or `drift.*` node (no predictions) | `"leverage"` |
-| Any `pool.*` or `uniswap.*` node (no predictions/leverage) | `"pool"` |
+| Any `lending.*` or `drift.*` node | `"leverage"` |
+| Any `pool.*` or `uniswap.*` node (no leverage) | `"pool"` |
 | Otherwise (swap.token only) | `"swap"` |
 
 ### Step 8: Preview, then optionally simulate
@@ -261,11 +236,11 @@ Render the preview so the user can sanity-check:
 Base token: USDC  ·  Min investment: {amount} USDC
 
 **Allocations**
-| Position                  | Allocation | Type        |
-|---------------------------|-----------|-------------|
-| SOL                       | 40%       | swap        |
-| BTC > $150k YES (Dec '26) | 30%       | prediction  |
-| JUP                       | 30%       | swap        |
+| Position | Allocation | Type  |
+|----------|-----------|-------|
+| SOL      | 40%       | swap  |
+| JUP      | 35%       | swap  |
+| JTO      | 25%       | swap  |
 
 **Strategy**
 {about}
@@ -278,7 +253,7 @@ Base token: USDC  ·  Min investment: {amount} USDC
 - **{header}** — {explanation}
 - ...
 
-Does this look right? Want to simulate it before we publish?
+Does this look right? Want to simulate it before we create it?
 ```
 
 If they say yes to simulate:
@@ -288,9 +263,28 @@ echo '{"definition": <bucket-model definition>, "amount": 100, "refresh": true}'
   | python3 <skill-path>/scripts/simulate_basket.py 2>/dev/null
 ```
 
-Surface key metrics: 1y / 30d / 7d return + APY, per-token price changes, prediction
-implied probability (for prediction markets). Then ask: *"Publish, adjust allocations,
-or cancel?"*
+Surface key metrics: 1y / 30d / 7d return + APY and per-token price changes. Then ask:
+*"Create it (active, not published), adjust allocations, or cancel?"*
+
+### Step 8b: Final allocation check (required)
+
+**Before calling `create_basket.py`, you must get the user to explicitly verify the final
+allocations.** Show the exact position list one more time with the percentages and the
+total, and ask for a clear go-ahead — do not create the basket until they confirm:
+
+```
+Final allocations:
+| Position | Allocation |
+|----------|-----------|
+| SOL      | 40%       |
+| JUP      | 35%       |
+| JTO      | 25%       |
+| **Total**| **100%**  |
+
+Confirm these allocations and I'll create the basket (it'll be active, not published). (yes / adjust / cancel)
+```
+
+If they ask to adjust, loop back to Step 5. Only proceed to Step 10 on an explicit "yes".
 
 ### Step 9: Cover image
 
@@ -358,6 +352,9 @@ From the normalized response capture:
 - `response.productId` — the product UUID for any follow-up calls.
 - `response.productSlug` — for the preview link (backend may have suffix-randomized).
 - `response.versionId` — the version row's UUID for Step 11.
+- `response.isActive` — should be `true` (the activation step ran). If it's `false` or
+  there's a `response.activateWarning`, the activation PUT failed — re-run `update_basket.py`
+  on the product to set it active. `isPublished` is never touched and stays false.
 - `response.raw` — the full backend response if you need anything else.
 
 If the response has `error: true` with status 400, surface the validation message
@@ -387,33 +384,22 @@ echo '{"changelog": "Initial release", "minimumInvestment": "10000000"}' \
 
 If they skip, proceed directly to Step 12.
 
-### Step 12: Confirm DRAFT status
+### Step 12: Confirm status
 
-Show this message **every time** a basket is created. Both roles need the heads-up —
-creators because the server forces `isActive: false, isPublished: false`; admins
-because this skill applies the same DRAFT-only rule even though they could publish
-through the admin UI. Pick the message variant based on the role you captured in
-Step 1:
+A created basket is **active** (`isActive=true`) but **not published** (`isPublished` stays
+false). Confirm this **every time**, after checking `response.isActive`:
 
-**If role is `CREATOR`:**
 ```
-✅ {Title} saved as DRAFT (v1)
+✅ {Title} created (v1) — ACTIVE
 
-Status: pending admin review — your basket isn't live yet.
-Investors won't see it until an admin publishes it.
+Status: active (isActive=true), not published (isPublished=false). Publishing is
+handled separately, outside this skill.
 
-Preview:  https://app.cesto.co/product/{slug}
-Tell the Cesto team or an admin when you'd like it published.
+Preview: https://app.cesto.co/product/{slug}
 ```
 
-**If role is `ADMIN`:**
-```
-✅ {Title} saved as DRAFT (v1)
-
-Status: DRAFT — this skill never publishes baskets, even for admins. When you're
-ready to take it live, do so from the frontend admin UI. Preview at
-https://app.cesto.co/product/{slug} in the meantime.
-```
+If `response.isActive` is `false` or there's a `response.activateWarning`, tell the user
+the activation step didn't go through and offer to retry via `update_basket.py`.
 
 ---
 
@@ -448,19 +434,11 @@ Flow C.
    ```bash
    echo '<partial payload>' | python3 update_basket.py --product-id <product-id> 2>/dev/null
    ```
-7. Show DRAFT-status reminder if the basket is still unpublished. Pick the variant
-   based on the caller's role (captured in Step 1):
+7. Confirm the update. The basket stays **active** (`isActive` is forced true) and
+   **unpublished** (`isPublished` is stripped), so an edit never deactivates or publishes it.
 
-   **CREATOR:**
    ```
-   ✏️ Updated {Title}. Still a DRAFT pending admin review.
-   Preview: https://app.cesto.co/product/{slug}
-   ```
-
-   **ADMIN:**
-   ```
-   ✏️ Updated {Title}. Still a DRAFT — this skill won't publish it; flip it
-   live from the frontend admin UI when ready.
+   ✏️ Updated {Title}. Still active (isActive=true), not published.
    Preview: https://app.cesto.co/product/{slug}
    ```
 
@@ -474,7 +452,7 @@ rebalance step (out of scope for this skill).
 
 When a creator says "rebalance" without naming a basket, **always** start with the list
 (Step 2) — never guess which basket they mean. The whole flow is list → pick → show
-detail → confirm changes → publish.
+detail → confirm changes → create the new version (draft).
 
 ### Step 1: Auth + role check
 
@@ -521,22 +499,23 @@ Decode the current allocations from `currentVersion.definition.bucket.nodes[]`:
 
 - `nodeType: "swap.token"` → token symbol from the toToken mint (resolve via
   `fetch_tokens.py` if needed), percentage from `amount.percentage`.
-- `nodeType: "prediction.open"` → `parameters.title` + `parameters.side`, percentage
-  from `amount.percentage`.
+- A legacy basket may still hold `prediction.open` nodes (`parameters.title` +
+  `parameters.side`). Decode and display them, but **don't add new prediction nodes** —
+  prediction markets are coming soon. Keep or drop existing ones per the user.
 
 Render a clear summary:
 
 ```
-**Football Glory** (currently v2, LIVE)
+**Layer-1 Index** (currently v2, LIVE)
 
 Min investment: 10 USDC · Created v1 on 2026-04-10, v2 on 2026-05-22
 
 **Current allocations**
-| Position                   | % | Type        |
-|----------------------------|---|-------------|
-| SOL                        | 40| swap        |
-| BTC > $150k YES (Dec '26)  | 35| prediction  |
-| JUP                        | 25| swap        |
+| Position | %  | Type |
+|----------|----|------|
+| SOL      | 40 | swap |
+| JUP      | 35 | swap |
+| JTO      | 25 | swap |
 
 **Strategy:** {about}
 **Risk notes:**   {riskNotes}
@@ -547,10 +526,11 @@ What would you like to change?
 
 ### Step 5: Take the user's changes
 
-Ask what's changing — they can add positions, remove positions, change percentages, or
-update the text fields (`about`, `riskNotes`, `resources`, `minimumInvestment`). Confirm
-each change before moving on. If you're (re)writing `about` / `riskNotes` / `resources`
-yourself, follow [`references/strategy-fields.md`](references/strategy-fields.md).
+Ask what's changing — they can add token positions, remove positions, change percentages,
+or update the text fields (`about`, `riskNotes`, `resources`, `minimumInvestment`). New
+positions are **token-only** (prediction markets are coming soon). Confirm each change
+before moving on. If you're (re)writing `about` / `riskNotes` / `resources` yourself,
+follow [`references/strategy-fields.md`](references/strategy-fields.md).
 
 **Allocations must sum to exactly 100.** Iterate until they do. Use
 `validate_allocations.py` to check a draft definition before submitting:
@@ -568,14 +548,14 @@ before touching the API if the sum isn't 100.
 
 Build a fresh bucket-model definition. Open
 [`references/workflow-definition.md`](references/workflow-definition.md) and use
-Template 1, 2, or 3 depending on the basket's composition. Every node uses
-`amount: { percentage: N }` — this is an open-style new version, not a sell/buy
-rebalance definition (the backend translates between versions on the investor side).
+Template 1 (token-only). Every node uses `amount: { percentage: N }` — this is an
+open-style new version, not a sell/buy rebalance definition (the backend translates
+between versions on the investor side).
 
 ### Step 7: Optionally simulate
 
 Same as Flow A Step 8 — pipe `{definition, amount: 100, refresh: true}` into
-`simulate_basket.py`, show the metrics, ask the user to confirm before publishing.
+`simulate_basket.py`, show the metrics, ask the user to confirm before creating the new version.
 
 ### Step 8: Confirm changelog
 
@@ -607,6 +587,26 @@ You do **not** compute the version number — the script does it.
    Notice we don't send `version.version` — the script auto-bumps. Don't send `label`,
    `riskLevel`, `estimatedApy`, or `isStable` either; the create endpoint rejects them.
 
+### Step 9b: Final allocation check (required)
+
+**Before calling `rebalance_basket.py`, get the user to explicitly verify the new
+allocations.** Show the new position list with percentages and the total, and wait for a
+clear go-ahead — don't submit the new version until they confirm:
+
+```
+New v{N} allocations:
+| Position | Allocation |
+|----------|-----------|
+| SOL      | 50%       |
+| JUP      | 30%       |
+| JTO      | 20%       |
+| **Total**| **100%**  |
+
+Confirm these allocations and I'll create the new version. (yes / adjust / cancel)
+```
+
+If they ask to adjust, loop back to Step 5. Only proceed to Step 10 on an explicit "yes".
+
 ### Step 10: Submit
 
 ```bash
@@ -631,29 +631,17 @@ If the user wants to update `changelog`, `minimumInvestment`, `tradingSchedule`,
 new `versionId`). Reminder: `riskLevel`, `label`, `estimatedApy`, and `isStable`
 are team-managed and cannot be set through this skill.
 
-### Step 12: Confirm DRAFT status
+### Step 12: Confirm status
 
-The **new version** is a draft until it's published. Pick the variant based on the
-caller's role (captured in Step 1):
+The basket stays **active** (`isActive=true`) and the new version is saved against it, but
+it is **not published** (`isPublished` stays false). Confirm:
 
-**CREATOR:**
 ```
-✅ {Title} v{N} saved as DRAFT
+✅ {Title} v{N} created
 
-The new allocations are pending admin review. Existing investors will see the new
-mix after they rebalance their position (or auto-rebalance if they've opted in).
-
-Preview: https://app.cesto.co/product/{slug}
-```
-
-**ADMIN:**
-```
-✅ {Title} v{N} saved as DRAFT
-
-The new allocations are saved but not published — this skill won't publish them.
-Flip the new version live from the frontend admin UI when ready. Existing
-investors pick up the new mix once they rebalance their position (or
-auto-rebalance kicks in).
+The basket is active with the new allocations, but not published — publishing is
+handled separately, outside this skill. Existing investors pick up the new mix once
+they rebalance their position (or auto-rebalance if they've opted in).
 
 Preview: https://app.cesto.co/product/{slug}
 ```
@@ -706,9 +694,9 @@ All bundled scripts output JSON. Suppress stderr with `2>/dev/null`.
 | `check_role.py` | Role lookup only | yes |
 | `api_request.py <METHOD> <URL> [JSON]` | Generic authenticated call | yes |
 | `fetch_tokens.py` | All supported tokens with prices | no |
-| `search_predictions.py` | Search/browse prediction events | no |
-| `get_prediction_detail.py` | Single event or market detail | no |
-| `fetch_my_baskets.py` | Creator's own baskets — surfaces DRAFT status | yes |
+| `search_predictions.py` | Prediction search — **coming soon, don't use** | no |
+| `get_prediction_detail.py` | Prediction detail — **coming soon, don't use** | no |
+| `fetch_my_baskets.py` | Creator's own baskets — surfaces LIVE/DRAFT status | yes |
 | `fetch_basket_detail.py <slug-or-id>` | Full product + latest version (uses owner endpoint when possible) | optional |
 | `simulate_basket.py` | Simulate a workflow definition | no |
 | `upload_thumbnail.py --file ¦ --url` | Upload cover image (manual) | yes |
@@ -719,8 +707,8 @@ All bundled scripts output JSON. Suppress stderr with `2>/dev/null`.
 | `ai_thumbnail_download.py --session-id --index [--output PATH]` | Upscale + save image to `~/Downloads` (or `--output`) | yes |
 | `to_base_units.py <amount> [--decimals=6]` | Convert human USDC amount to base-unit string (e.g. `10` → `"10000000"`); use for `minimumInvestment` | no |
 | `validate_allocations.py` | Reads JSON from stdin; verifies percentages sum to 100; accepts allocation array, bucket model, or wrapper object | no |
-| `create_basket.py` | POST `/creator/products` (passthrough); validates allocations before submit | yes |
-| `update_basket.py --product-id <id>` | PUT `/creator/products/:id` (passthrough) | yes |
+| `create_basket.py` | POST `/creator/products`, validates allocations, then PUTs isActive=true (active). Never sends isPublished. Returns `isActive` / `activateWarning` | yes |
+| `update_basket.py --product-id <id>` | PUT `/creator/products/:id` (passthrough); forces isActive=true, strips isPublished — stays active, never published | yes |
 | `rebalance_basket.py --product-id <id>` | POST `/creator/products/:id/versions` with auto-version-bump, allocation validation, and version-collision retry | yes |
 | `update_version_metadata.py --product-id <pid> --version-id <vid>` | PUT `/creator/products/versions/:id` — patches changelog, minimumInvestment, tradingSchedule, isDeprecated only; strips riskLevel/label/estimatedApy/isStable (unsupported by backend) with a warning | yes |
 
@@ -758,5 +746,8 @@ Session keys never appear in agent output — the helper scripts manage the
 
 Keep the conversation natural. Use the bundled scripts — one execution per step, no
 chaining of `curl` calls. Parse responses and present clean tables; never dump raw JSON
-at the user. Confirm DRAFT status every time you create or rebalance — creators
-otherwise believe their basket is live when it isn't.
+at the user. **Always get the user to verify the final allocations before creating or
+rebalancing** (Flow A Step 8b, Flow C Step 9b). Baskets are kept **active** (`isActive=true`)
+but **never published** (`isPublished` false) — confirm that status when you create or
+rebalance. Prediction markets are **coming soon** — keep baskets token-only and never add
+`prediction.*` nodes.

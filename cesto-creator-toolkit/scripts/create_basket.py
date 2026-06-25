@@ -3,8 +3,9 @@
 Create a product basket via POST /creator/products.
 
 Passthrough: reads the full JSON payload from stdin and POSTs it as-is.
-The server forces isActive=false and isPublished=false for all roles
-(including admins), so the new basket is always saved as a DRAFT pending admin publish.
+The server forces isActive=false and isPublished=false on create. This script
+then sets isActive=true with a follow-up PUT (the basket is always ACTIVE), but
+NEVER touches isPublished — it stays false. So: isActive=true, isPublished=false.
 
 Required server-side: either `product.logoUrl` (valid URL) or
 `product.aiGenerateThumbnail: true`. The `version` block must include
@@ -206,15 +207,10 @@ def main():
     if product is not None and not product.get("slug"):
         product["slug"] = _to_slug(product.get("name", "")) or "basket"
 
-    # Publication guardrail (belt-and-suspenders). On create, the backend already
-    # forces isActive=false and isPublished=false for EVERY role, so a created
-    # basket is always a DRAFT regardless of payload or role. We still strip these
-    # fields client-side for clarity and to stay consistent with update_basket.py
-    # (where the strip genuinely matters — on UPDATE the backend honors
-    # isActive/isPublished from an ADMIN payload). This skill never publishes;
-    # publication is a frontend admin-UI action.
+    # Keep isPublished false always — this skill never "publishes" a basket.
+    # isActive is forced true after create (see the activation PUT below); the
+    # backend ignores isActive in the create body anyway, so we don't touch it here.
     if isinstance(payload.get("product"), dict):
-        payload["product"].pop("isActive", True)
         payload["product"].pop("isPublished", None)
 
     # Fail fast: validate allocations sum to exactly 100 before hitting the API.
@@ -248,6 +244,32 @@ def main():
             "version": version_obj.get("version"),
             "raw": result,
         }
+
+        # Keep isActive true always. The create endpoint forces isActive=false,
+        # so set it true with a follow-up PUT. isPublished is left false (never
+        # sent), so the basket ends up ACTIVE but not published.
+        normalized["isActive"] = False
+        product_id_new = normalized.get("productId")
+        if product_id_new:
+            act_body = json.dumps({"product": {"isActive": True}}).encode()
+            act_req = urllib.request.Request(
+                f"{BASE_URL}{ENDPOINT}/{product_id_new}", data=act_body, method="PUT"
+            )
+            act_req.add_header("Authorization", f"Bearer {token}")
+            act_req.add_header("Content-Type", "application/json")
+            try:
+                act_resp = urllib.request.urlopen(act_req, timeout=30)
+                act_result = json.loads(act_resp.read().decode())
+                # PUT wraps the product under a "product" key on some codepaths.
+                act_product = act_result.get("product") if isinstance(act_result.get("product"), dict) else act_result
+                normalized["isActive"] = bool(act_product.get("isActive", True))
+                normalized["raw"]["activate"] = act_result
+            except Exception as act_e:
+                normalized["activateWarning"] = (
+                    f"Basket created but the activation step (isActive=true) failed: {act_e}. "
+                    f"Retry by re-running update_basket.py on this product."
+                )
+
         print(json.dumps(normalized))
     except urllib.error.HTTPError as e:
         error_body = e.read().decode()
