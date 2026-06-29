@@ -6,19 +6,24 @@ Reads a partial JSON payload from stdin and PUTs it. Only send fields you
 want to change. To change allocations (the workflow definition), use
 rebalance_basket.py instead — it creates a new version.
 
-This skill keeps `product.isActive` true always and `product.isPublished` false
-always. PUT /creator/products/:id honors both fields, so this script forces
-`isActive=true` into the payload and strips `isPublished` — every edit leaves the
-basket ACTIVE but not published. Cover image, content fields, etc. work the same
-for both roles.
+`isActive` / `isPublished` are role-aware:
+  - ADMIN:   both pass through as provided — admins may activate, deactivate,
+             publish, or unpublish a basket through this script.
+  - CREATOR: `isActive` is honored (activate/deactivate your own basket), but
+             `isPublished` is NOT applicable and is stripped — publishing is
+             admin-only.
+Any field you don't send is left unchanged (partial update), so a content-only
+edit won't change the active/published state. Cover image and content fields
+work the same for both roles.
 
 Where each field belongs:
   product.*   — name, description, category, tags, logoUrl, aiGenerateThumbnail,
                 pointsMultiplier, creatorFeeSharePercentage, metadata
-  workflow.*  — name, description, category, tags, definition (rare — use rebalance instead)
   version.*   — changelog, minimumInvestment, isDeprecated, inputTokenMint,
-                inputTokenDecimals, about, riskNotes, resources
-                (updates the LATEST version's metadata)
+                inputTokenDecimals, about, riskNotes, resources, definition
+                (updates the LATEST version's metadata in place; sending
+                `definition` here mutates the current version — to preserve
+                history, publish a new version with rebalance_basket.py instead)
 
 For setting `label`, `riskLevel`, `estimatedApy`, `isStable` on a specific
 version, use update_version_metadata.py instead.
@@ -98,7 +103,7 @@ def main():
         sys.exit(1)
 
     if not isinstance(payload, dict):
-        print(json.dumps({"error": True, "message": "Payload must be a JSON object (partial product/workflow/version)."}))
+        print(json.dumps({"error": True, "message": "Payload must be a JSON object (partial product/version)."}))
         sys.exit(1)
 
     # Get session
@@ -142,15 +147,17 @@ def main():
         }))
         sys.exit(1)
 
-    # Keep isActive true always and isPublished false always. Force isActive=true
-    # into the product block so an edit never deactivates the basket, and strip
-    # isPublished so this skill never "publishes". (PUT honors both fields.)
+    # Role-aware isActive / isPublished:
+    #   - ADMIN: pass BOTH through exactly as provided (activate/deactivate/
+    #     publish/unpublish all allowed). Nothing forced or stripped.
+    #   - CREATOR: isActive is honored, but isPublished is NOT applicable — strip
+    #     it so it's never sent. (The backend enforces this too; stripping here
+    #     makes it an explicit no-op rather than a silently-ignored field.)
+    # Partial update: any field not sent is left unchanged server-side, so a
+    # content-only edit never needs to force isActive.
     product_block = payload.get("product")
-    if not isinstance(product_block, dict):
-        product_block = {}
-        payload["product"] = product_block
-    product_block["isActive"] = True
-    product_block.pop("isPublished", None)
+    if isinstance(product_block, dict) and role != "ADMIN":
+        product_block.pop("isPublished", None)
 
     # PUT
     result, err = _http("PUT", f"{ENDPOINT}/{product_id}", token, body=payload)
