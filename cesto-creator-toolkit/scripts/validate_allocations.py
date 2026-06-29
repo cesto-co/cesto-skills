@@ -67,11 +67,11 @@ def _extract_percentages(data):
     if "definition" in data:
         return _extract_percentages(data["definition"])
 
-    # Workflow wrapper.
-    if "workflow" in data and isinstance(data["workflow"], dict):
-        wf = data["workflow"]
-        if "definition" in wf:
-            return _extract_percentages(wf["definition"])
+    # Version wrapper ({ version: { definition, ... } } — create/rebalance payload).
+    if "version" in data and isinstance(data["version"], dict):
+        ver = data["version"]
+        if "definition" in ver:
+            return _extract_percentages(ver["definition"])
 
     return [], "Could not find allocations. Expected 'allocations', a raw array, or a bucket model with 'bucket.nodes[].amount.percentage'."
 

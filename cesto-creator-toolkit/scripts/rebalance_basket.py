@@ -2,13 +2,14 @@
 """
 Create a new ProductVersion (rebalance) for an existing basket.
 
-Reads a {workflow, version} payload from stdin and POSTs to
-/creator/products/:productId/versions. Automatically fetches all existing
-versions via GET /creator/products/:id and computes nextVersion = max + 1
-so the caller doesn't have to.
+Reads a {version} payload from stdin and POSTs to
+/creator/products/:productId/versions. The `version` block carries the new
+`definition` (bucket-model WorkflowDefinition). Automatically fetches all
+existing versions via GET /creator/products/:id and computes
+nextVersion = max + 1 so the caller doesn't have to.
 
 Usage:
-  echo '{"workflow": {...}, "version": {...}}' \
+  echo '{"version": {"definition": {...}, "minimumInvestment": "...", ...}}' \
     | python3 rebalance_basket.py --product-id <product-id-or-slug>
 
 The payload's `version` block should NOT include `version` (auto-bumped),
@@ -90,13 +91,13 @@ def _extract_percentages_from_definition(definition):
 
 def _validate_allocations(payload):
     """
-    Inspect payload for workflow.definition and verify that node percentages
+    Inspect payload for version.definition and verify that node percentages
     sum to exactly 100. Returns None if valid, or a human-readable error string.
     """
-    workflow = payload.get("workflow") if isinstance(payload.get("workflow"), dict) else None
-    if workflow is None:
-        return None  # No workflow block — nothing to validate.
-    definition = workflow.get("definition")
+    version = payload.get("version") if isinstance(payload.get("version"), dict) else None
+    if version is None:
+        return None  # No version block — nothing to validate.
+    definition = version.get("definition")
     if definition is None:
         return None  # No definition — let the API validate.
     percentages = _extract_percentages_from_definition(definition)
@@ -144,7 +145,7 @@ def main():
         sys.exit(1)
 
     if not isinstance(payload, dict):
-        print(json.dumps({"error": True, "message": "Payload must be a JSON object with workflow and version."}))
+        print(json.dumps({"error": True, "message": "Payload must be a JSON object with a version block."}))
         sys.exit(1)
 
     # Session

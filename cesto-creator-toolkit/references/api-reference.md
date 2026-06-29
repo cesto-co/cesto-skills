@@ -183,7 +183,7 @@ Public. Run a workflow definition against historical data to preview performance
 Auth + `CREATOR` (or `ADMIN`) role. Creates a product plus its first ProductVersion atomically.
 
 **Important constraints enforced server-side**
-- `isActive` and `isPublished` are FORCED to false server-side on create for every role (including admins), so a created product is always a DRAFT. create_basket.py also strips them client-side as belt-and-suspenders. (Note: on UPDATE via PUT /creator/products/:id, the backend instead honors these from an admin payload — see §8.)
+- `isActive` and `isPublished` are FORCED to false server-side on create for every role (including admins), so a created product starts as an inactive DRAFT. `create_basket.py` strips `isPublished` and then follows the create with a PUT that sets `isActive=true` (activation works for creators and admins alike), so a freshly created basket ends up `isActive=true, isPublished=false`. (Note: on UPDATE via PUT /creator/products/:id, the backend honors `isActive` for everyone and `isPublished` from admin payloads only — see §8.)
 - `slug` is required by the DTO (any non-empty string), but the controller overwrites it with `toSlug(name)` before persisting (lowercased, hyphenated, deduplicated with a random suffix on collision). The skill's `create_basket.py` auto-derives slug from name when missing — you never need to send it yourself.
 - Either `logoUrl` (valid URL) or `aiGenerateThumbnail: true` must be present. Sending neither is a 400.
 
@@ -208,14 +208,8 @@ with `toSlug(name)` server-side regardless.
     "pointsMultiplier": 1,                          // optional, ≥0
     "metadata": {}                                  // optional, free-form
   },
-  "workflow": {
-    "name": "Football Glory",                       // required, ≤200 chars
-    "description": "...",                           // optional, ≤1000 chars
-    "category": "prediction",                       // optional, mirrors product.category
-    "tags": [],                                     // optional
-    "definition": { /* bucket-model WorkflowDefinition */ }
-  },
   "version": {                                      // CreateVersionDataDto
+    "definition": { /* bucket-model WorkflowDefinition */ },  // REQUIRED — persisted to ProductVersion.definition
     "changelog": "Initial version",                 // optional, ≤1000 chars
     "minimumInvestment": "10000000",                // REQUIRED, base units (10 USDC = "10000000")
     "isDeprecated": false,                          // optional
@@ -306,18 +300,12 @@ Auth + `CREATOR`/`ADMIN`. Partial update — only send fields you want changed.
     "pointsMultiplier": 1,
     "creatorFeeSharePercentage": 0.1,// 0-1; null clears
     "metadata": null
-    // isActive / isPublished are honored from admin payloads server-side, but
-    // update_basket.py strips them client-side for BOTH roles — the skill
-    // never publishes a basket. Publish from the frontend admin UI instead.
-  },
-  "workflow": {                      // optional partial — usually omit; use POST /versions for definition changes
-    "name": "...",
-    "description": "...",
-    "category": "...",
-    "tags": [...],
-    "definition": { /* full new bucket-model definition */ }
+    // isActive / isPublished handling is role-aware (server-side AND in
+    // update_basket.py): admins pass through BOTH fields; creators may set
+    // isActive but isPublished is stripped — publishing is admin-only.
   },
   "version": {                       // optional partial — updates the LATEST version's metadata
+    "definition": { /* full new bucket-model definition */ },  // usually OMIT — mutates the current version in place; use POST /versions (§10) to publish allocation changes as a new version
     "changelog": "...",
     "minimumInvestment": "...",
     "isDeprecated": false,
@@ -383,18 +371,12 @@ Auth + `CREATOR`/`ADMIN`. Creates a new version of an existing product (the crea
 
 **Path param**: `productId` — product UUID.
 
-**Request — `CreateCreatorProductVersionDto`**
+**Request — `CreateCreatorProductVersionDto`** (no `product`; `productId` is the path param)
 ```jsonc
 {
-  "workflow": {                     // CreateWorkflowDataDto
-    "name": "Football Glory v3",
-    "description": "Reweighted after CL draw",
-    "category": "prediction",
-    "tags": [],
-    "definition": { /* full new bucket-model definition */ }
-  },
   "version": {                      // CreateProductVersionDataDto
     "version": 3,                   // REQUIRED, ≥1 — must be higher than any existing version
+    "definition": { /* full new bucket-model definition */ },  // REQUIRED — persisted to ProductVersion.definition
     "changelog": "Reduced PSG by 10%, added Real Madrid YES",
     "minimumInvestment": "10000000",
     "isDeprecated": false,
@@ -503,11 +485,11 @@ Auth required. Returns the calling creator's products only (or all visible produ
 ]
 ```
 
-Surface `isActive`/`isPublished` to the creator — anything with `isActive: false` is a DRAFT awaiting admin publish.
+Surface `isActive`/`isPublished` to the creator — anything with `isActive: false` is an inactive DRAFT (the owner, creator or admin, can activate it via an update; publishing `isPublished` is a separate admin-only action).
 
 ## 13. `GET /products/:slug`
 
-Public (auth optional — enriches some fields when authenticated). Returns the latest version of a product. The response shape is **flat** — no `{ product, workflow, version }` nesting.
+Public (auth optional — enriches some fields when authenticated). Returns the latest version of a product. The response shape is **flat** — no `{ product, version }` nesting.
 
 **Path param**: slug or product UUID.
 

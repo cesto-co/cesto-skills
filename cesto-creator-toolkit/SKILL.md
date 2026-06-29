@@ -26,8 +26,11 @@ description: >
 # Cesto Creator Toolkit
 
 Help creators design and revise product baskets on [Cesto](https://app.cesto.co)
-through the backend API at `https://backend.cesto.co`. Baskets are always **active**
-(`isActive=true`) but **never published** (`isPublished` stays false) through this skill.
+through the backend API at `https://backend.cesto.co`. A freshly **created** basket is
+always **active** (`isActive=true`) and **unpublished** (`isPublished=false`) for both
+roles. On **edit**, activation is role-aware: a creator may activate/deactivate their
+own basket, while publishing (`isPublished`) is **admin-only** (see the role-aware
+guardrail below).
 
 Baskets hold token swaps (USDC → token allocations). The base input token is always USDC.
 
@@ -48,7 +51,13 @@ pre-flight against `/users/me` → `createdBy`; the agent should also start from
 `fetch_my_baskets.py` (which is server-scoped to the caller via `?mine=true`) and
 never let the user paste a slug for a basket they didn't create.
 
-**Active-but-unpublished guardrail.** Through this skill, every basket is kept **active** (`isActive=true`) and **never published** (`isPublished` stays false). On CREATE, the backend forces `isActive=false`/`isPublished=false`, so `create_basket.py` follows the create with a PUT that sets `isActive=true` (it never sends `isPublished`). On UPDATE, `update_basket.py` forces `isActive=true` into the payload and strips `isPublished`, so an edit can never deactivate the basket and can never publish it. Publishing (flipping `isPublished` true) is out of scope — it's a separate action outside this skill.
+**Active / published guardrail (role-aware).** On **CREATE**, the backend forces `isActive=false`/`isPublished=false` for every role, so `create_basket.py` follows the create with a PUT that sets `isActive=true` (it never sends `isPublished`). This activation now works for creators too, not just admins — so a freshly created basket is `isActive=true, isPublished=false` for everyone.
+
+On **UPDATE**, `update_basket.py` is **role-aware**:
+- **Admin:** both `isActive` and `isPublished` pass through exactly as provided — an admin may activate, deactivate, publish, or unpublish a basket through this skill. Nothing is forced or stripped.
+- **Creator:** `isActive` is honored (a creator may activate/deactivate their **own** basket), but `isPublished` is stripped — publishing is **admin-only**.
+
+Updates are partial: any field you don't send is left unchanged server-side. The skill no longer forces `isActive=true` on every edit, so a content-only edit leaves the active/published state untouched.
 
 ---
 
@@ -326,13 +335,8 @@ Build the payload. Reference: [`references/api-reference.md` §7](references/api
     "logoUrl": "{from step 9, or omit if AI}",
     "aiGenerateThumbnail": false           // set true if user picked option 3
   },
-  "workflow": {
-    "name": "{Title}",
-    "description": "{Description}",
-    "category": "{derived category}",
-    "definition": { /* bucket model from step 6 */ }
-  },
   "version": {
+    "definition": { /* bucket model from step 6 */ },
     "changelog": "Initial version",
     "minimumInvestment": "{base units}",
     "isDeprecated": false,
@@ -392,8 +396,9 @@ false). Confirm this **every time**, after checking `response.isActive`:
 ```
 ✅ {Title} created (v1) — ACTIVE
 
-Status: active (isActive=true), not published (isPublished=false). Publishing is
-handled separately, outside this skill.
+Status: active (isActive=true), not published (isPublished=false). Publishing is an
+admin-only action — an admin can flip `isPublished` later via an update (Flow B);
+creators cannot publish.
 
 Preview: https://app.cesto.co/product/{slug}
 ```
@@ -423,7 +428,7 @@ Flow C.
      and you're asked to complete the strategy details)? Write them to house format via
      [`references/strategy-fields.md`](references/strategy-fields.md) — research the
      constituents first, don't write from memory.
-   - Definition changes go in `workflow.definition` — but that's a rebalance; redirect
+   - Definition changes go in `version.definition` — but that's a rebalance; redirect
      to Flow C instead.
    - **Changing the cover image?** Run [Flow A Step 9](#step-9-cover-image), pick file,
      URL, or AI generation (Midjourney/Gemini). Whatever final URL you end up with goes
@@ -434,11 +439,15 @@ Flow C.
    ```bash
    echo '<partial payload>' | python3 update_basket.py --product-id <product-id> 2>/dev/null
    ```
-7. Confirm the update. The basket stays **active** (`isActive` is forced true) and
-   **unpublished** (`isPublished` is stripped), so an edit never deactivates or publishes it.
+7. Confirm the update. Active/published handling is **role-aware** and only changes if
+   you sent those fields — any field you don't send is left as-is server-side:
+   - **Admin:** `isActive` and `isPublished` both pass through as provided, so an admin
+     can activate, deactivate, publish, or unpublish here.
+   - **Creator:** `isActive` is honored (you can activate/deactivate your own basket),
+     but `isPublished` is stripped — publishing is admin-only.
 
    ```
-   ✏️ Updated {Title}. Still active (isActive=true), not published.
+   ✏️ Updated {Title}. Active/published state unchanged unless you set it.
    Preview: https://app.cesto.co/product/{slug}
    ```
 
@@ -568,12 +577,8 @@ You do **not** compute the version number — the script does it.
 
    ```jsonc
    {
-     "workflow": {
-       "name": "{Title}",                  // can keep the same name
-       "description": "{updated description}",
-       "definition": { /* new bucket model */ }
-     },
      "version": {
+       "definition": { /* new bucket model */ },
        "changelog": "{from step 7}",
        "minimumInvestment": "{base units; usually the same as before}",
        "isDeprecated": false,
@@ -633,15 +638,15 @@ are team-managed and cannot be set through this skill.
 
 ### Step 12: Confirm status
 
-The basket stays **active** (`isActive=true`) and the new version is saved against it, but
-it is **not published** (`isPublished` stays false). Confirm:
+Creating a new version does **not** publish and does **not** change `isActive` — the
+basket keeps whatever active/published state it already had. Confirm:
 
 ```
 ✅ {Title} v{N} created
 
-The basket is active with the new allocations, but not published — publishing is
-handled separately, outside this skill. Existing investors pick up the new mix once
-they rebalance their position (or auto-rebalance if they've opted in).
+The new allocations are saved against the basket; its active/published state is
+unchanged by the rebalance. Existing investors pick up the new mix once they
+rebalance their position (or auto-rebalance if they've opted in).
 
 Preview: https://app.cesto.co/product/{slug}
 ```
@@ -707,8 +712,8 @@ All bundled scripts output JSON. Suppress stderr with `2>/dev/null`.
 | `ai_thumbnail_download.py --session-id --index [--output PATH]` | Upscale + save image to `~/Downloads` (or `--output`) | yes |
 | `to_base_units.py <amount> [--decimals=6]` | Convert human USDC amount to base-unit string (e.g. `10` → `"10000000"`); use for `minimumInvestment` | no |
 | `validate_allocations.py` | Reads JSON from stdin; verifies percentages sum to 100; accepts allocation array, bucket model, or wrapper object | no |
-| `create_basket.py` | POST `/creator/products`, validates allocations, then PUTs isActive=true (active). Never sends isPublished. Returns `isActive` / `activateWarning` | yes |
-| `update_basket.py --product-id <id>` | PUT `/creator/products/:id` (passthrough); forces isActive=true, strips isPublished — stays active, never published | yes |
+| `create_basket.py` | POST `/creator/products`, validates allocations, then PUTs isActive=true (works for creators and admins). Strips isPublished. Returns `isActive` / `activateWarning` | yes |
+| `update_basket.py --product-id <id>` | PUT `/creator/products/:id` (partial). Role-aware: admins pass through both isActive + isPublished; creators may set isActive but isPublished is stripped (publish is admin-only). Sends only the fields you supply | yes |
 | `rebalance_basket.py --product-id <id>` | POST `/creator/products/:id/versions` with auto-version-bump, allocation validation, and version-collision retry | yes |
 | `update_version_metadata.py --product-id <pid> --version-id <vid>` | PUT `/creator/products/versions/:id` — patches changelog, minimumInvestment, tradingSchedule, isDeprecated only; strips riskLevel/label/estimatedApy/isStable (unsupported by backend) with a warning | yes |
 
@@ -747,7 +752,9 @@ Session keys never appear in agent output — the helper scripts manage the
 Keep the conversation natural. Use the bundled scripts — one execution per step, no
 chaining of `curl` calls. Parse responses and present clean tables; never dump raw JSON
 at the user. **Always get the user to verify the final allocations before creating or
-rebalancing** (Flow A Step 8b, Flow C Step 9b). Baskets are kept **active** (`isActive=true`)
-but **never published** (`isPublished` false) — confirm that status when you create or
+rebalancing** (Flow A Step 8b, Flow C Step 9b). A freshly created basket is **active**
+(`isActive=true`) and **unpublished** (`isPublished=false`) for both roles; on edit,
+activation is role-aware (creators may activate/deactivate their own basket) and
+publishing (`isPublished`) is **admin-only** — confirm the status when you create or
 rebalance. Prediction markets are **coming soon** — keep baskets token-only and never add
 `prediction.*` nodes.

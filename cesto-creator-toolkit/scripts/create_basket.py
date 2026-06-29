@@ -3,13 +3,17 @@
 Create a product basket via POST /creator/products.
 
 Passthrough: reads the full JSON payload from stdin and POSTs it as-is.
-The server forces isActive=false and isPublished=false on create. This script
-then sets isActive=true with a follow-up PUT (the basket is always ACTIVE), but
-NEVER touches isPublished — it stays false. So: isActive=true, isPublished=false.
+The server forces isActive=false and isPublished=false on create, so every
+basket starts as an inactive DRAFT. This script then activates it (isActive=true)
+with a follow-up PUT — for BOTH creators and admins (the backend now lets a
+creator set isActive on their own basket). Publishing is a separate, ADMIN-only
+step: run update_basket.py with `product.isPublished: true`. So a freshly created
+basket is always isActive=true, isPublished=false.
 
 Required server-side: either `product.logoUrl` (valid URL) or
 `product.aiGenerateThumbnail: true`. The `version` block must include
-`minimumInvestment` (base units, string).
+`definition` (the bucket-model WorkflowDefinition) and `minimumInvestment`
+(base units, string).
 
 Fields NOT accepted by the create-version DTO (will 400 — forbidNonWhitelisted):
   version.label, version.riskLevel, version.estimatedApy, version.isStable,
@@ -31,10 +35,12 @@ anyway, so you never need to compute the slug yourself.
       "tags": ["football", "polymarket"],
       "logoUrl": "https://res.cloudinary.com/.../cover.png"
     },
-    "workflow": {
-      "name": "Football Glory",
-      "description": "European football meets crypto",
-      "category": "prediction",
+    "version": {
+      "changelog": "Initial version",
+      "minimumInvestment": "10000000",
+      "about": "Long-form strategy description, >= 20 chars.",
+      "riskNotes": "**No Liquidation Risk** — ...",
+      "resources": "**Thesis** — ...",
       "definition": {
         "bucket": {
           "mode": "parallel",
@@ -74,13 +80,6 @@ anyway, so you never need to compute the slug yourself.
           ]
         }
       }
-    },
-    "version": {
-      "changelog": "Initial version",
-      "minimumInvestment": "10000000",
-      "about": "Long-form strategy description, >= 20 chars.",
-      "riskNotes": "**No Liquidation Risk** — ...",
-      "resources": "**Thesis** — ..."
     }
   }
 
@@ -150,13 +149,13 @@ def _extract_percentages_from_definition(definition):
 
 def _validate_allocations(payload):
     """
-    Inspect payload for workflow.definition and verify that node percentages
+    Inspect payload for version.definition and verify that node percentages
     sum to exactly 100. Returns None if valid, or a human-readable error string.
     """
-    workflow = payload.get("workflow") if isinstance(payload.get("workflow"), dict) else None
-    if workflow is None:
-        return None  # No workflow block — nothing to validate here.
-    definition = workflow.get("definition")
+    version = payload.get("version") if isinstance(payload.get("version"), dict) else None
+    if version is None:
+        return None  # No version block — nothing to validate here.
+    definition = version.get("definition")
     if definition is None:
         return None  # No definition — skip (the API will reject it anyway).
     percentages = _extract_percentages_from_definition(definition)
@@ -181,7 +180,7 @@ def main():
         sys.exit(1)
 
     if not isinstance(payload, dict):
-        print(json.dumps({"error": True, "message": "Payload must be a JSON object with product, workflow, and version."}))
+        print(json.dumps({"error": True, "message": "Payload must be a JSON object with product and version."}))
         sys.exit(1)
 
     # Get session
@@ -207,9 +206,10 @@ def main():
     if product is not None and not product.get("slug"):
         product["slug"] = _to_slug(product.get("name", "")) or "basket"
 
-    # Keep isPublished false always — this skill never "publishes" a basket.
-    # isActive is forced true after create (see the activation PUT below); the
-    # backend ignores isActive in the create body anyway, so we don't touch it here.
+    # New baskets are always created as drafts: the create endpoint forces
+    # isPublished=false (and isActive=false) server-side. Strip isPublished from
+    # the create body so publishing is never attempted at create time — it's an
+    # ADMIN-only follow-up via update_basket.py. The basket is activated below.
     if isinstance(payload.get("product"), dict):
         payload["product"].pop("isPublished", None)
 
@@ -245,9 +245,11 @@ def main():
             "raw": result,
         }
 
-        # Keep isActive true always. The create endpoint forces isActive=false,
-        # so set it true with a follow-up PUT. isPublished is left false (never
-        # sent), so the basket ends up ACTIVE but not published.
+        # Activate the basket. The create endpoint forces isActive=false, so set
+        # it true with a follow-up PUT. This now works for creators too (the
+        # backend lets a creator set isActive on their own basket); admins could
+        # always do it. isPublished is left false — publishing is a separate
+        # ADMIN-only step via update_basket.py.
         normalized["isActive"] = False
         product_id_new = normalized.get("productId")
         if product_id_new:
