@@ -102,6 +102,7 @@ import sys
 sys.dont_write_bytecode = True
 import json, urllib.request
 from _store import read_session, ACCESS_KEY
+from _common import coerce_minimum_investment
 
 BASE_URL = "https://backend.cesto.co"
 ENDPOINT = "/creator/products"
@@ -220,6 +221,10 @@ def main():
         print(json.dumps({"error": True, "message": _alloc_err}))
         sys.exit(1)
 
+    # Guard: minimumInvestment must be a string. A JSON number slips past DTO
+    # validation and 500s with a raw Prisma error — coerce it to a string here.
+    _mi_warning = coerce_minimum_investment(payload)
+
     url = f"{BASE_URL}{ENDPOINT}"
 
     # POST
@@ -244,6 +249,8 @@ def main():
             "version": version_obj.get("version"),
             "raw": result,
         }
+        if _mi_warning:
+            normalized["minimumInvestmentWarning"] = _mi_warning
 
         # Activate the basket. The create endpoint forces isActive=false, so set
         # it true with a follow-up PUT. This now works for creators too (the

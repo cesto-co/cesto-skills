@@ -48,7 +48,7 @@ import urllib.error
 import urllib.request
 
 from _store import read_session, ACCESS_KEY
-from _common import resolve_product_uuid
+from _common import resolve_product_uuid, coerce_minimum_investment
 
 BASE_URL = "https://backend.cesto.co"
 ENDPOINT = "/creator/products"
@@ -159,11 +159,17 @@ def main():
     if isinstance(product_block, dict) and role != "ADMIN":
         product_block.pop("isPublished", None)
 
+    # Guard: minimumInvestment must be a string. A JSON number slips past DTO
+    # validation and 500s with a raw Prisma error — coerce it to a string here.
+    mi_warning = coerce_minimum_investment(payload)
+
     # PUT
     result, err = _http("PUT", f"{ENDPOINT}/{product_id}", token, body=payload)
     if err:
         print(json.dumps({"error": True, **err}))
         sys.exit(1)
+    if mi_warning and isinstance(result, dict):
+        result["minimumInvestmentWarning"] = mi_warning
     print(json.dumps(result))
 
 

@@ -565,7 +565,54 @@ If a creator asks "how do my investors get the new allocations", the answer: the
 | 404 | Slug/ID unknown, or product `isActive: false` and caller isn't the owner. | Verify slug/UUID; for draft baskets, use `GET /creator/products/:id`. |
 | 429 | Rate-limited. | Brief backoff, retry. |
 
-Validation errors include a flattened `message` field. Common server-side codes you may see in the error body: `WORKFLOW_VALIDATION_FAILED`, `FORBIDDEN_OPERATION`, `RESOURCE_NOT_FOUND`, `INVALID_INPUT`, `DUPLICATE_RESOURCE`.
+Validation errors include a flattened `message` field. Common server-side codes you may see in the error body: `WORKFLOW_VALIDATION_FAILED`, `FORBIDDEN_OPERATION`, `RESOURCE_NOT_FOUND`, `INVALID_INPUT`, `DUPLICATE_RESOURCE`, `SWAP_QUOTE_FAILED`.
+
+### Pre-check validation errors (`errors[]` array)
+
+Create, update (allocation change), version-create, and rebalance run server-side
+**pre-checks** on the basket's tokens. When one or more tokens fail, the backend
+aggregates **all** of them and returns an `errors` array alongside the usual
+`code` + `message` (the `message` is a concatenated summary of the same issues).
+The skill scripts pass this array straight through, so the error body looks like:
+
+```json
+{
+  "error": true,
+  "status": 400,
+  "code": "INVALID_INPUT",                  // or "SWAP_QUOTE_FAILED" for routability
+  "message": "Product validation failed with 2 issue(s): NVDAon: ... ; ABC: ...",
+  "errors": [
+    {
+      "rule": "liquidity",                  // "liquidity" | "minimum_allocation" | "routability"
+      "mint": "…",
+      "symbol": "ABC",
+      "message": "ABC: liquidity $40000 is below the required $100000.",
+      "liquidityUsd": 40000,
+      "requiredLiquidityUsd": 100000
+    },
+    {
+      "rule": "minimum_allocation",
+      "mint": "…ondo",
+      "symbol": "NVDAon",
+      "message": "NVDAon: the 2% allocation (~$0.20) is below the $5.00 minimum for this token. Increase the minimum investment or the allocation.",
+      "allocationPercent": 2,
+      "allocationUsd": "0.20",
+      "tokenMinimumUsd": "5.00"
+    }
+  ]
+}
+```
+
+The three pre-check rules:
+
+| `rule` | What failed | How the creator fixes it |
+|---|---|---|
+| `liquidity` | A token's on-chain liquidity is below its required floor (Ondo RWA tokens are exempt). | Drop the token or wait for liquidity to recover. |
+| `minimum_allocation` | A token's USD share (`allocationPercent% × minimumInvestment`) is below that token's per-token minimum. On rebalance, the **change** in allocation is what's measured. | Raise the basket's `minimumInvestment`, or increase that token's allocation %. |
+| `routability` | No swap route is currently available for the token (after retries). | Verify the token is tradable; remove it or try again later. |
+
+When you see an `errors` array, **list every item's `message` to the creator as a
+bullet list** so they can fix all of them at once — don't just show the first one.
 
 ## 16. AI thumbnail builder — `/thumbnails/ai/*`
 
