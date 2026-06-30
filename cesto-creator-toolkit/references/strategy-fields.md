@@ -166,5 +166,6 @@ These three strings feed the create/rebalance/update payload's `version` block:
 }
 ```
 
-Return to whichever flow sent you here (Flow A Step 10, Flow B Step 5, or Flow C Step 9) with
-the three fields filled in. Don't publish — the skill is draft-only by design.
+Return to whichever flow sent you here (Flow A Step 8b, Flow B Step 5, or Flow C Step 7c) with
+the three fields filled in — in Flow A/C this only happens *after* the creator has approved the
+allocation (Gate 1). Don't publish — the skill is draft-only by design.

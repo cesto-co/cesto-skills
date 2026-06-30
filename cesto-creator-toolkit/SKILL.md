@@ -145,7 +145,12 @@ URL allowlist is `https://backend.cesto.co`.
 Run `session_status.py`. If expired, `start_login.py`. If unauthorized, stop and tell the
 user their role. (See [Authentication](#authentication--role-check).)
 
-### Step 2: Gather metadata
+### Step 2: Gather the basics (identity + minimum investment)
+
+Collect only the lightweight identity fields now. **Do not draft `about`, `riskNotes`, or
+`resources` yet** — those are written later, in Step 8b, *after* the creator has approved the
+allocation (Gate 1). This keeps you from spending research effort on a basket they haven't
+signed off on.
 
 Ask the user (or draft from their request — they confirm):
 
@@ -153,20 +158,13 @@ Ask the user (or draft from their request — they confirm):
 |---|---|---|
 | Title | 3 chars | Basket name. Slug auto-generates from this. |
 | Description | 10 chars | One-line pitch. |
-| About | 20 chars | Full strategy description. |
-| Risk notes | 10 chars | **Format as bullet points with bold headers** — `**No Liquidation Risk** — All positions are binary.` |
-| Resources | 20 chars | Thesis, links, reasoning. **Bullet points with bold headers** — `**Thesis** — ...` |
 | Minimum investment | > 0 USDC | Always ask: *"What's the minimum investment for this basket?"* Convert to base units before submitting (USDC has 6 decimals → 10 USDC = `"10000000"`). Convert with `python3 to_base_units.py 10` → `"10000000"`, `python3 to_base_units.py 12.5` → `"12500000"`. |
 
 Don't ask about base token — it's always USDC. Don't ask about `riskLevel` / `label` /
 `estimatedApy` / `isStable` — those are managed by the Cesto team during review and
 cannot be set through this skill.
 
-When you draft `about`, `riskNotes`, or `resources` (rather than the user supplying final
-copy), write them to Cesto's house format and voice — open
-[`references/strategy-fields.md`](references/strategy-fields.md) for the per-type section
-skeletons, the bolded-allocation-line rule, and the web-research requirements. Fold the
-result into the payload's `version` block in Step 10.
+`about`, `riskNotes`, and `resources` come later (Step 8b), once the allocation is locked in.
 
 ### Step 3: Token selection
 
@@ -234,9 +232,13 @@ Walk the nodes you built in Step 6 and pick a category:
 | Any `pool.*` or `uniswap.*` node (no leverage) | `"pool"` |
 | Otherwise (swap.token only) | `"swap"` |
 
-### Step 8: Preview, then optionally simulate
+### Step 8: Allocation preview + approval (Gate 1 — required)
 
-Render the preview so the user can sanity-check:
+This is the **first** of two approval gates. Show **only** the positions and allocation
+amounts — **no `about`, no `riskNotes`, no `resources`** (they don't exist yet, and won't
+until this gate passes). The whole point of Gate 1 is to let the creator/admin sign off on
+*the basket itself* — which tokens, and how much goes into each — **before** any strategy
+content is researched or written:
 
 ```
 **{Title}**
@@ -250,39 +252,47 @@ Base token: USDC  ·  Min investment: {amount} USDC
 | SOL      | 40%       | swap  |
 | JUP      | 35%       | swap  |
 | JTO      | 25%       | swap  |
+| **Total**| **100%**  |       |
 
-**Strategy**
-{about}
-
-**Risk**
-- **{header}** — {explanation}
-- ...
-
-**Thesis / Resources**
-- **{header}** — {explanation}
-- ...
-
-Does this look right? Want to simulate it before we create it?
+Do you like this basket? I can simulate it first if you want. (yes / simulate / adjust / cancel)
 ```
 
-If they say yes to simulate:
+If they want to simulate before deciding:
 
 ```bash
 echo '{"definition": <bucket-model definition>, "amount": 100, "refresh": true}' \
   | python3 <skill-path>/scripts/simulate_basket.py 2>/dev/null
 ```
 
-Surface key metrics: 1y / 30d / 7d return + APY and per-token price changes. Then ask:
-*"Create it (active, not published), adjust allocations, or cancel?"*
+Surface key metrics: 1y / 30d / 7d return + APY and per-token price changes, then ask again
+whether they like the basket.
 
-### Step 8b: Final allocation check (required)
+If they ask to adjust, loop back to Step 5 and re-show this gate. **Do not move on to Step 8b
+until the creator explicitly approves the allocation** ("yes" / "I like it"). If they never
+approve, no strategy content is generated and nothing is created.
 
-**Before calling `create_basket.py`, you must get the user to explicitly verify the final
-allocations.** Show the exact position list one more time with the percentages and the
-total, and ask for a clear go-ahead — do not create the basket until they confirm:
+### Step 8b: Generate the strategy fields (about / risk / resources)
+
+**Only after Gate 1 approval.** Now write the three fields you deferred in Step 2: `about`,
+`riskNotes`, and `resources`. Write them to Cesto's house format and voice — open
+[`references/strategy-fields.md`](references/strategy-fields.md) for the per-type section
+skeletons, the bolded-allocation-line rule, and the web-research requirements. Research the
+constituents first; don't write from memory. Fold the result into the payload's `version`
+block in Step 10.
+
+### Step 8c: Final review + confirm (Gate 2 — required)
+
+The **second** gate. Now that the full basket exists — allocation **plus** the strategy
+content from Step 8b — show the complete thing and get an explicit final go-ahead. **Do not
+call `create_basket.py` until they confirm:**
 
 ```
-Final allocations:
+**{Title}** — final review
+{Description}
+
+Base token: USDC  ·  Min investment: {amount} USDC
+
+**Allocations**
 | Position | Allocation |
 |----------|-----------|
 | SOL      | 40%       |
@@ -290,10 +300,22 @@ Final allocations:
 | JTO      | 25%       |
 | **Total**| **100%**  |
 
-Confirm these allocations and I'll create the basket (it'll be active, not published). (yes / adjust / cancel)
+**Strategy**
+{about}
+
+**Risk**
+- **{header}** — {explanation}
+
+**Thesis / Resources**
+- **{header}** — {explanation}
+
+Create it (active, not published)? (yes / adjust allocations / edit text / cancel)
 ```
 
-If they ask to adjust, loop back to Step 5. Only proceed to Step 10 on an explicit "yes".
+- **adjust allocations** → loop back to Step 5 (this re-opens Gate 1, then regenerate the
+  strategy fields in Step 8b).
+- **edit text** → revise `about` / `riskNotes` / `resources` (Step 8b) and re-show this gate.
+- Only proceed to Step 9 on an explicit "yes".
 
 ### Step 9: Cover image
 
@@ -533,13 +555,13 @@ Min investment: 10 USDC · Created v1 on 2026-04-10, v2 on 2026-05-22
 What would you like to change?
 ```
 
-### Step 5: Take the user's changes
+### Step 5: Take the user's allocation changes
 
-Ask what's changing — they can add token positions, remove positions, change percentages,
-or update the text fields (`about`, `riskNotes`, `resources`, `minimumInvestment`). New
-positions are **token-only** (prediction markets are coming soon). Confirm each change
-before moving on. If you're (re)writing `about` / `riskNotes` / `resources` yourself,
-follow [`references/strategy-fields.md`](references/strategy-fields.md).
+Ask what's changing in the **allocation** — they can add token positions, remove positions,
+change percentages, or adjust `minimumInvestment`. New positions are **token-only**
+(prediction markets are coming soon). Confirm each change before moving on. **Don't rewrite
+`about` / `riskNotes` / `resources` yet** — those are updated later, in Step 7c, *after* the
+creator approves the new allocation (Gate 1).
 
 **Allocations must sum to exactly 100.** Iterate until they do. Use
 `validate_allocations.py` to check a draft definition before submitting:
@@ -563,8 +585,36 @@ between versions on the investor side).
 
 ### Step 7: Optionally simulate
 
-Same as Flow A Step 8 — pipe `{definition, amount: 100, refresh: true}` into
-`simulate_basket.py`, show the metrics, ask the user to confirm before creating the new version.
+Pipe `{definition, amount: 100, refresh: true}` into `simulate_basket.py` and show the
+metrics so the creator can judge the new allocation. This feeds the allocation gate below.
+
+### Step 7b: Allocation approval (Gate 1 — required)
+
+The **first** of two gates. Show **only** the new positions and allocation amounts — **no
+`about` / `riskNotes` / `resources`** (you haven't touched them yet). Let the creator/admin
+sign off on the new allocation before any strategy content is rewritten:
+
+```
+**{Title}** — proposed v{N} allocation
+| Position | Allocation |
+|----------|-----------|
+| SOL      | 50%       |
+| JUP      | 30%       |
+| JTO      | 20%       |
+| **Total**| **100%**  |
+
+Do you like this rebalance? I can simulate it first if you want. (yes / simulate / adjust / cancel)
+```
+
+If they ask to adjust, loop back to Step 5 and re-show this gate. **Do not move on to Step 7c
+until the creator explicitly approves the new allocation.**
+
+### Step 7c: Update the strategy fields (about / risk / resources)
+
+**Only after Gate 1 approval.** Now (re)write `about` / `riskNotes` / `resources` to reflect
+the new allocation — or keep them as-is if the rebalance doesn't change the thesis. When you
+write them yourself, follow [`references/strategy-fields.md`](references/strategy-fields.md)
+and research the constituents first.
 
 ### Step 8: Confirm changelog
 
@@ -592,14 +642,14 @@ You do **not** compute the version number — the script does it.
    Notice we don't send `version.version` — the script auto-bumps. Don't send `label`,
    `riskLevel`, `estimatedApy`, or `isStable` either; the create endpoint rejects them.
 
-### Step 9b: Final allocation check (required)
+### Step 9b: Final review + confirm (Gate 2 — required)
 
-**Before calling `rebalance_basket.py`, get the user to explicitly verify the new
-allocations.** Show the new position list with percentages and the total, and wait for a
-clear go-ahead — don't submit the new version until they confirm:
+The **second** gate. Show the complete new version — allocation **plus** the
+`about` / `riskNotes` / `resources` from Step 7c and the changelog — and wait for a clear
+final go-ahead. Don't call `rebalance_basket.py` until they confirm:
 
 ```
-New v{N} allocations:
+New v{N} — final review
 | Position | Allocation |
 |----------|-----------|
 | SOL      | 50%       |
@@ -607,10 +657,17 @@ New v{N} allocations:
 | JTO      | 20%       |
 | **Total**| **100%**  |
 
-Confirm these allocations and I'll create the new version. (yes / adjust / cancel)
+**Strategy:**   {about}
+**Risk notes:** {riskNotes}
+**Resources:**  {resources}
+**Changelog:**  {changelog}
+
+Create the new version? (yes / adjust allocations / edit text / cancel)
 ```
 
-If they ask to adjust, loop back to Step 5. Only proceed to Step 10 on an explicit "yes".
+- **adjust allocations** → loop back to Step 5 (re-opens Gate 1, then Step 7c).
+- **edit text** → revise the strategy fields (Step 7c) and re-show this gate.
+- Only proceed to Step 10 on an explicit "yes".
 
 ### Step 10: Submit
 
@@ -751,8 +808,10 @@ Session keys never appear in agent output — the helper scripts manage the
 
 Keep the conversation natural. Use the bundled scripts — one execution per step, no
 chaining of `curl` calls. Parse responses and present clean tables; never dump raw JSON
-at the user. **Always get the user to verify the final allocations before creating or
-rebalancing** (Flow A Step 8b, Flow C Step 9b). A freshly created basket is **active**
+at the user. **Approval is two-gated for both create and rebalance:** get the creator to
+sign off on the allocation *before* you write any `about`/`riskNotes`/`resources` (Gate 1),
+then have them review the full basket again before you create or rebalance (Gate 2) — Flow A
+Steps 8 & 8c, Flow C Steps 7b & 9b. A freshly created basket is **active**
 (`isActive=true`) and **unpublished** (`isPublished=false`) for both roles; on edit,
 activation is role-aware (creators may activate/deactivate their own basket) and
 publishing (`isPublished`) is **admin-only** — confirm the status when you create or
