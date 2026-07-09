@@ -250,11 +250,12 @@ Base token: USDC  ·  Min investment: {amount} USDC
 | SOL      | 40%       | swap  |
 | JUP      | 35%       | swap  |
 | JTO      | 25%       | swap  |
+| **Total**| **100%**  |       |
 
 Is this the allocation you want? Want to simulate it before we lock it in?
 ```
 
-If they say yes to simulate:
+If they want to simulate before deciding:
 
 ```bash
 echo '{"definition": <bucket-model definition>, "amount": 100, "refresh": true}' \
@@ -271,7 +272,12 @@ what the user wanted, and explicitly ask whether they want to change anything** 
 moving on. Show the position list with the percentages and the total:
 
 ```
-Final allocations:
+**{Title}** — final review
+{Description}
+
+Base token: USDC  ·  Min investment: {amount} USDC
+
+**Allocations**
 | Position | Allocation |
 |----------|-----------|
 | SOL      | 40%       |
@@ -545,13 +551,13 @@ Min investment: 10 USDC · Created v1 on 2026-04-10, v2 on 2026-05-22
 What would you like to change?
 ```
 
-### Step 5: Take the user's changes
+### Step 5: Take the user's allocation changes
 
-Ask what's changing — they can add token positions, remove positions, change percentages,
-or update the text fields (`about`, `riskNotes`, `resources`, `minimumInvestment`). New
-positions are **token-only** (prediction markets are coming soon). Confirm each change
-before moving on. If you're (re)writing `about` / `riskNotes` / `resources` yourself,
-follow [`references/strategy-fields.md`](references/strategy-fields.md).
+Ask what's changing in the **allocation** — they can add token positions, remove positions,
+change percentages, or adjust `minimumInvestment`. New positions are **token-only**
+(prediction markets are coming soon). Confirm each change before moving on. **Don't rewrite
+`about` / `riskNotes` / `resources` yet** — those are updated later, in Step 7c, *after* the
+creator approves the new allocation (Gate 1).
 
 **Allocations must sum to exactly 100.** Iterate until they do. Use
 `validate_allocations.py` to check a draft definition before submitting:
@@ -575,8 +581,36 @@ between versions on the investor side).
 
 ### Step 7: Optionally simulate
 
-Same as Flow A Step 8 — pipe `{definition, amount: 100, refresh: true}` into
-`simulate_basket.py`, show the metrics, ask the user to confirm before creating the new version.
+Pipe `{definition, amount: 100, refresh: true}` into `simulate_basket.py` and show the
+metrics so the creator can judge the new allocation. This feeds the allocation gate below.
+
+### Step 7b: Allocation approval (Gate 1 — required)
+
+The **first** of two gates. Show **only** the new positions and allocation amounts — **no
+`about` / `riskNotes` / `resources`** (you haven't touched them yet). Let the creator/admin
+sign off on the new allocation before any strategy content is rewritten:
+
+```
+**{Title}** — proposed v{N} allocation
+| Position | Allocation |
+|----------|-----------|
+| SOL      | 50%       |
+| JUP      | 30%       |
+| JTO      | 20%       |
+| **Total**| **100%**  |
+
+Do you like this rebalance? I can simulate it first if you want. (yes / simulate / adjust / cancel)
+```
+
+If they ask to adjust, loop back to Step 5 and re-show this gate. **Do not move on to Step 7c
+until the creator explicitly approves the new allocation.**
+
+### Step 7c: Update the strategy fields (about / risk / resources)
+
+**Only after Gate 1 approval.** Now (re)write `about` / `riskNotes` / `resources` to reflect
+the new allocation — or keep them as-is if the rebalance doesn't change the thesis. When you
+write them yourself, follow [`references/strategy-fields.md`](references/strategy-fields.md)
+and research the constituents first.
 
 ### Step 8: Confirm changelog
 
@@ -604,14 +638,14 @@ You do **not** compute the version number — the script does it.
    Notice we don't send `version.version` — the script auto-bumps. Don't send `label`,
    `riskLevel`, `estimatedApy`, or `isStable` either; the create endpoint rejects them.
 
-### Step 9b: Final allocation check (required)
+### Step 9b: Final review + confirm (Gate 2 — required)
 
-**Before calling `rebalance_basket.py`, get the user to explicitly verify the new
-allocations.** Show the new position list with percentages and the total, and wait for a
-clear go-ahead — don't submit the new version until they confirm:
+The **second** gate. Show the complete new version — allocation **plus** the
+`about` / `riskNotes` / `resources` from Step 7c and the changelog — and wait for a clear
+final go-ahead. Don't call `rebalance_basket.py` until they confirm:
 
 ```
-New v{N} allocations:
+New v{N} — final review
 | Position | Allocation |
 |----------|-----------|
 | SOL      | 50%       |
@@ -619,10 +653,17 @@ New v{N} allocations:
 | JTO      | 20%       |
 | **Total**| **100%**  |
 
-Confirm these allocations and I'll create the new version. (yes / adjust / cancel)
+**Strategy:**   {about}
+**Risk notes:** {riskNotes}
+**Resources:**  {resources}
+**Changelog:**  {changelog}
+
+Create the new version? (yes / adjust allocations / edit text / cancel)
 ```
 
-If they ask to adjust, loop back to Step 5. Only proceed to Step 10 on an explicit "yes".
+- **adjust allocations** → loop back to Step 5 (re-opens Gate 1, then Step 7c).
+- **edit text** → revise the strategy fields (Step 7c) and re-show this gate.
+- Only proceed to Step 10 on an explicit "yes".
 
 ### Step 10: Submit
 
@@ -768,8 +809,10 @@ Session keys never appear in agent output — the helper scripts manage the
 
 Keep the conversation natural. Use the bundled scripts — one execution per step, no
 chaining of `curl` calls. Parse responses and present clean tables; never dump raw JSON
-at the user. **Always get the user to verify the final allocations before creating or
-rebalancing** (Flow A Step 8b, Flow C Step 9b). A freshly created basket is **active**
+at the user. **Approval is two-gated for both create and rebalance:** get the creator to
+sign off on the allocation *before* you write any `about`/`riskNotes`/`resources` (Gate 1),
+then have them review the full basket again before you create or rebalance (Gate 2) — Flow A
+Steps 8 & 8c, Flow C Steps 7b & 9b. A freshly created basket is **active**
 (`isActive=true`) and **unpublished** (`isPublished=false`) for both roles; on edit,
 activation is role-aware (creators may activate/deactivate their own basket) and
 publishing (`isPublished`) is **admin-only** — confirm the status when you create or
