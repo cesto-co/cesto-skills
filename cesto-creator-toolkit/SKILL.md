@@ -145,14 +145,13 @@ URL allowlist is `https://backend.cesto.co`.
 Run `session_status.py`. If expired, `start_login.py`. If unauthorized, stop and tell the
 user their role. (See [Authentication](#authentication--role-check).)
 
-### Step 2: Gather the basics (identity + minimum investment)
+### Step 2: Gather the fundamentals (title, description, minimum investment)
 
-Collect only the lightweight identity fields now. **Do not draft `about`, `riskNotes`, or
-`resources` yet** — those are written later, in Step 8b, *after* the creator has approved the
-allocation (Gate 1). This keeps you from spending research effort on a basket they haven't
-signed off on.
-
-Ask the user (or draft from their request — they confirm):
+Build a basket **fundamentals-first**. The fundamentals are **title, description, and
+allocations** — collect those, lock the allocations with the user, and only *then* move on
+to the about / risk / resources copy and the cover image. So at this step ask for **just**
+these — **don't** ask for about / risk / resources yet (that's Step 8c, after the
+allocations are locked):
 
 | Field | Min | Notes |
 |---|---|---|
@@ -164,7 +163,9 @@ Don't ask about base token — it's always USDC. Don't ask about `riskLevel` / `
 `estimatedApy` / `isStable` — those are managed by the Cesto team during review and
 cannot be set through this skill.
 
-`about`, `riskNotes`, and `resources` come later (Step 8b), once the allocation is locked in.
+**The order is deliberate:** title → description → allocations → **confirm the allocations
+(Step 8b)** → about / risk / resources (Step 8c) → cover image (Step 9) → create. Don't
+write strategy copy or generate a thumbnail for a basket whose allocations aren't settled.
 
 ### Step 3: Token selection
 
@@ -232,13 +233,10 @@ Walk the nodes you built in Step 6 and pick a category:
 | Any `pool.*` or `uniswap.*` node (no leverage) | `"pool"` |
 | Otherwise (swap.token only) | `"swap"` |
 
-### Step 8: Allocation preview + approval (Gate 1 — required)
+### Step 8: Preview the allocations, then optionally simulate
 
-This is the **first** of two approval gates. Show **only** the positions and allocation
-amounts — **no `about`, no `riskNotes`, no `resources`** (they don't exist yet, and won't
-until this gate passes). The whole point of Gate 1 is to let the creator/admin sign off on
-*the basket itself* — which tokens, and how much goes into each — **before** any strategy
-content is researched or written:
+Render the **allocation** preview so the user can sanity-check. Strategy copy (about /
+risk / resources) isn't written yet — that's Step 8c — so don't show it here:
 
 ```
 **{Title}**
@@ -254,7 +252,7 @@ Base token: USDC  ·  Min investment: {amount} USDC
 | JTO      | 25%       | swap  |
 | **Total**| **100%**  |       |
 
-Do you like this basket? I can simulate it first if you want. (yes / simulate / adjust / cancel)
+Is this the allocation you want? Want to simulate it before we lock it in?
 ```
 
 If they want to simulate before deciding:
@@ -264,27 +262,14 @@ echo '{"definition": <bucket-model definition>, "amount": 100, "refresh": true}'
   | python3 <skill-path>/scripts/simulate_basket.py 2>/dev/null
 ```
 
-Surface key metrics: 1y / 30d / 7d return + APY and per-token price changes, then ask again
-whether they like the basket.
+Surface key metrics: 1y / 30d / 7d return + APY and per-token price changes, then go to the
+allocation confirmation (Step 8b).
 
-If they ask to adjust, loop back to Step 5 and re-show this gate. **Do not move on to Step 8b
-until the creator explicitly approves the allocation** ("yes" / "I like it"). If they never
-approve, no strategy content is generated and nothing is created.
+### Step 8b: Confirm & lock the allocations (required)
 
-### Step 8b: Generate the strategy fields (about / risk / resources)
-
-**Only after Gate 1 approval.** Now write the three fields you deferred in Step 2: `about`,
-`riskNotes`, and `resources`. Write them to Cesto's house format and voice — open
-[`references/strategy-fields.md`](references/strategy-fields.md) for the per-type section
-skeletons, the bolded-allocation-line rule, and the web-research requirements. Research the
-constituents first; don't write from memory. Fold the result into the payload's `version`
-block in Step 10.
-
-### Step 8c: Final review + confirm (Gate 2 — required)
-
-The **second** gate. Now that the full basket exists — allocation **plus** the strategy
-content from Step 8b — show the complete thing and get an explicit final go-ahead. **Do not
-call `create_basket.py` until they confirm:**
+This is the key checkpoint of the whole flow. **Always confirm the allocations are exactly
+what the user wanted, and explicitly ask whether they want to change anything** before
+moving on. Show the position list with the percentages and the total:
 
 ```
 **{Title}** — final review
@@ -300,22 +285,29 @@ Base token: USDC  ·  Min investment: {amount} USDC
 | JTO      | 25%       |
 | **Total**| **100%**  |
 
-**Strategy**
-{about}
-
-**Risk**
-- **{header}** — {explanation}
-
-**Thesis / Resources**
-- **{header}** — {explanation}
-
-Create it (active, not published)? (yes / adjust allocations / edit text / cancel)
+Is this the allocation you want, or do you want to change anything? (looks good / adjust / cancel)
 ```
 
-- **adjust allocations** → loop back to Step 5 (this re-opens Gate 1, then regenerate the
-  strategy fields in Step 8b).
-- **edit text** → revise `about` / `riskNotes` / `resources` (Step 8b) and re-show this gate.
-- Only proceed to Step 9 on an explicit "yes".
+If they want to adjust, loop back to Step 3 and re-confirm here. **Only once the user locks
+the allocations** do you move on — to the strategy fields (Step 8c) and the cover image
+(Step 9). Don't write about / risk / resources or generate a thumbnail for a basket whose
+allocations aren't settled.
+
+### Step 8c: Strategy fields — about, risk notes, resources
+
+Now that the allocations are locked, gather (or write) the strategy copy:
+
+| Field | Min | Notes |
+|---|---|---|
+| About | 20 chars | Full strategy description. |
+| Risk notes | 10 chars | **Bullet points with bold headers** — `**No Liquidation Risk** — All positions are binary.` |
+| Resources | 20 chars | Thesis, links, reasoning. **Bullet points with bold headers** — `**Thesis** — ...` |
+
+If the user supplies final copy, use it. When you draft any of `about` / `riskNotes` /
+`resources` yourself, write them to Cesto's house format and voice — open
+[`references/strategy-fields.md`](references/strategy-fields.md) for the per-type section
+skeletons, the bolded-allocation-line rule, and the web-research requirements. Fold the
+result into the payload's `version` block in Step 10.
 
 ### Step 9: Cover image
 
@@ -385,6 +377,10 @@ From the normalized response capture:
 
 If the response has `error: true` with status 400, surface the validation message
 verbatim — almost always a definition-shape problem (see workflow-definition.md).
+If the error body carries an **`errors` array** (token pre-check failures —
+liquidity, minimum allocation, or routability), list **every** item's `message`
+as a bullet list so the creator can fix them all at once, then offer to retry.
+See [api-reference.md §15](references/api-reference.md#15-error-codes) for the shape.
 
 ### Step 11: Patch version metadata (second half, optional)
 
@@ -796,11 +792,16 @@ Session keys never appear in agent output — the helper scripts manage the
 
 | Status | Most likely cause | What to do |
 |---|---|---|
-| 400 | DTO validation failed — a field is the wrong type, missing, an unknown extra, or `definition` doesn't conform to the bucket model. | Surface the API `message` verbatim. If it mentions `definition`, re-read [`workflow-definition.md`](references/workflow-definition.md). |
+| 400 | DTO validation failed — a field is the wrong type, missing, an unknown extra, or `definition` doesn't conform to the bucket model. OR a token **pre-check** failed (`code: INVALID_INPUT` with an `errors` array — liquidity / minimum allocation). | If there's an `errors` array, list **every** item's `message` as bullets so the creator fixes them all at once (see [api-reference.md §15](references/api-reference.md#15-error-codes)). Otherwise surface the API `message` verbatim; if it mentions `definition`, re-read [`workflow-definition.md`](references/workflow-definition.md). |
 | 401 | JWT expired. | `session_status.py` refreshes automatically; if it returns `expired`, run `start_login.py`. |
+| 400/502/503 `SWAP_QUOTE_FAILED` | A token in the basket isn't routable on Jupiter right now (pre-check Rule 5). Comes with an `errors` array of `routability` items. | List the affected tokens from `errors[]`; suggest removing them or retrying shortly. |
+| 403 `FORBIDDEN_OPERATION` | Rule 3 — editing allocations in place on a **published** basket, or on one with **open positions**. No `errors` array (it's a single business-rule block, not a per-token pre-check). | Surface the `message` verbatim — it already explains the fix ("publish a new version…"). To change allocations here, use [Flow C — Rebalance](#flow-c--rebalance-new-version). |
 | 403 | Wrong role, or trying to act on a basket the caller doesn't own (admins included — the skill blocks cross-creator edits). | Tell the user: "Access denied — this skill needs CREATOR or ADMIN role on a basket you created yourself." |
 | 404 | Slug/UUID unknown, or basket is `isActive: false` and caller isn't the owner. | Verify the identifier. Drafts are visible only to their creator. |
 | 429 | Rate-limited. | Brief backoff, retry once. |
+| 500 `UNKNOWN_ERROR` / unexpected | A server-side failure slipped through (e.g. a malformed value the DTO didn't catch). The `message` may be a long internal/Prisma blob. | **Do NOT dump the raw blob at the user.** Say an unexpected server error occurred and quote the `correlationId` so support can trace it (e.g. "Something went wrong server-side — correlationId `…`. Want me to retry?"). Check the payload first: `minimumInvestment` **must be a base-unit string** (`"10000000"`, not the number `10000000`) — the scripts now coerce numbers to strings and add a `minimumInvestmentWarning`, but a bad shape elsewhere can still 500. |
+
+> **On the wire, `code` is the enum value, not the logical name** — you'll see `SYS_1001` (= `INVALID_INPUT`), `SWAP_6101` (= `SWAP_QUOTE_FAILED`), `API_7008` (= `FORBIDDEN_OPERATION`), `API_7003` (= not found). Decide behavior off the **`errors` array** and HTTP `status`, and show the human-readable `message` — never surface the raw `code` to the creator.
 
 ---
 

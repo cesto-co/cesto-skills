@@ -28,7 +28,7 @@ import urllib.error
 import urllib.request
 
 from _store import read_session, ACCESS_KEY
-from _common import resolve_product_uuid
+from _common import resolve_product_uuid, coerce_minimum_investment
 
 BASE_URL = "https://backend.cesto.co"
 
@@ -211,6 +211,10 @@ def main():
     version_data.setdefault("isDeprecated", False)
     payload["version"] = version_data
 
+    # Guard: minimumInvestment must be a string. A JSON number slips past DTO
+    # validation and 500s with a raw Prisma error — coerce it to a string here.
+    mi_warning = coerce_minimum_investment(payload)
+
     # POST the new version.
     result = _http(
         "POST",
@@ -256,12 +260,15 @@ def main():
 
     # Normalize: backend returns either `version` or `productVersion`.
     version_obj = result.get("productVersion") or result.get("version") or {}
-    print(json.dumps({
+    normalized = {
         "productId": product_uuid,
         "versionId": version_obj.get("id"),
         "version": version_obj.get("version") or next_version,
         "raw": result,
-    }))
+    }
+    if mi_warning:
+        normalized["minimumInvestmentWarning"] = mi_warning
+    print(json.dumps(normalized))
 
 
 if __name__ == "__main__":

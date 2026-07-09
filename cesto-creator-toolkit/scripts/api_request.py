@@ -64,5 +64,13 @@ try:
     resp = urllib.request.urlopen(req)
     print(resp.read().decode())
 except urllib.error.HTTPError as e:
-    print(json.dumps({"error": True, "status": e.code, "message": e.read().decode()}))
+    # Parse the error body and spread it so fields like `code`, `message`,
+    # `errors`, and `correlationId` come through as real JSON — not a single
+    # double-encoded string blob (which would leak raw Prisma/internal text).
+    body_text = e.read().decode()
+    try:
+        err = json.loads(body_text)
+    except Exception:
+        err = {"message": body_text}
+    print(json.dumps({"error": True, "status": e.code, **err}))
     sys.exit(1)
