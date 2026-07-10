@@ -1,0 +1,30 @@
+{
+  "name": "cesto",
+  "owner": {
+    "name": "Cesto",
+    "email": "team@cesto.co"
+  },
+  "description": "Official Cesto agent skills — install the Cesto Toolkit (and Creator Toolkit) directly in Claude Code.",
+  "plugins": [
+    {
+      "name": "cesto-toolkit",
+      "source": "./",
+      "skills": ["./cesto-toolkit"],
+      "description": "Turn any coding agent into a full Cesto client — browse and analyze baskets, simulate portfolios against the S&P 500, and create & vote on community baskets on Cesto Labs.",
+      "version": "1.0.0",
+      "homepage": "https://docs.cesto.co/cesto/skill",
+      "repository": "https://github.com/cesto-co/cesto-skills",
+      "strict": false
+    },
+    {
+      "name": "cesto-creator-toolkit",
+      "source": "./",
+      "skills": ["./cesto-creator-toolkit"],
+      "description": "Creator/Admin toolkit for building, editing, rebalancing, and simulating product baskets on Cesto. Requires a CREATOR or ADMIN role.",
+      "version": "1.0.0",
+      "homepage": "https://docs.cesto.co/cesto/skill",
+      "repository": "https://github.com/cesto-co/cesto-skills",
+      "strict": false
+    }
+  ]
+}
